@@ -585,11 +585,20 @@ let serverAvailable = false;
 
 // ── Google Drive (Apps Script backend) ────────
 const GDRIVE_URL_KEY = 'parka_gdrive_url';
+// URL fija del Apps Script — así cualquier dispositivo que abra la app
+// ya guarda los despachos en Drive automáticamente, sin tener que
+// configurar "Google Drive Sync" a mano en cada celular.
+const DEFAULT_GDRIVE_URL = 'https://script.google.com/macros/s/AKfycbwP_qnW67-sO-EMCyZSVStCkRXCXtNT7mDE-l-z6vqGFbmZVumhMf7KBTxMiXfZeu-X/exec';
 
-function getGDriveUrl() { return localStorage.getItem(GDRIVE_URL_KEY) || ''; }
+const GDRIVE_DISABLED_SENTINEL = '__DISABLED__';
+function getGDriveUrl() {
+  const stored = localStorage.getItem(GDRIVE_URL_KEY);
+  if (stored === GDRIVE_DISABLED_SENTINEL) return ''; // explícitamente desconectado en este dispositivo
+  return stored || DEFAULT_GDRIVE_URL;
+}
 function setGDriveUrl(url) {
   if (url) localStorage.setItem(GDRIVE_URL_KEY, url.trim());
-  else localStorage.removeItem(GDRIVE_URL_KEY);
+  else localStorage.setItem(GDRIVE_URL_KEY, GDRIVE_DISABLED_SENTINEL);
 }
 
 async function gdriveGet(action, params) {
@@ -2095,6 +2104,12 @@ function setDespachoUI(phase) {
   } else if (phase === 'saving') {
     bIni.disabled = true; bFin.disabled = true;
     bFin.innerHTML = ic('loader-circle') + ' Guardando…';
+  } else if (phase === 'retry') {
+    // Falló el guardado en Drive. No se descarga nada localmente:
+    // los items quedan en currentDespacho para reintentar con el mismo botón.
+    bIni.disabled = true;  bIni.classList.add('opacity-40','cursor-not-allowed');
+    bFin.disabled = false; bFin.classList.remove('opacity-40','cursor-not-allowed');
+    bFin.innerHTML = ic('refresh-cw') + ' Reintentar guardar en Drive';
   }
   if (window.lucide) lucide.createIcons();
 }
@@ -2126,6 +2141,7 @@ async function finalizarDespacho() {
   let savedFileName = '';
   let savedTo = 'local';
 
+  let failReason = 'Sin conexión con el script (revisá el deployment: Acceso → Cualquier persona)';
   if (url) {
     try {
       const r = await fetch(url, {
@@ -2134,39 +2150,49 @@ async function finalizarDespacho() {
         body: JSON.stringify({ action: 'procesarExcel', data: { datos: items, fecha: date } }),
         redirect: 'follow',
       });
-      driveResult = await r.json();
-    } catch(e) { driveResult = null; }
+      if (!r.ok) {
+        failReason = 'El script respondió HTTP ' + r.status;
+      } else {
+        try {
+          driveResult = await r.json();
+          if (driveResult && driveResult.error) failReason = String(driveResult.error).slice(0, 200);
+          else if (!driveResult || !driveResult.ok) failReason = 'El script no devolvió ok:true';
+        } catch (je) {
+          failReason = 'Respuesta no-JSON del script — verificá que el deployment sea "Aplicación web"';
+        }
+      }
+    } catch (e) {
+      failReason = String(e).includes('Failed to fetch') || String(e).includes('NetworkError')
+        ? 'Sin conexión, o el deployment no es público (Acceso → Cualquier persona)'
+        : String(e).slice(0, 200);
+      driveResult = null;
+    }
   }
 
   if (driveResult && driveResult.ok) {
     savedTo = 'drive';
     savedFileName = driveResult.fileName || '';
     toast('✅ ' + driveResult.fileName + ' guardado en Drive (' + n + ' paquetes)', 'ok', 6000);
+
+    saveDespachoLog({
+      ts: new Date().toISOString(),
+      fileName: (state && state.fileName) || '',
+      count: n,
+      items,
+      savedTo,
+      savedFileName,
+    });
+
+    currentDespacho = [];
+    setDespachoUI('idle');
   } else {
-    toast(url ? 'Drive no disponible — descargando localmente' : 'Descargando reporte…', 'warn', 4000);
-    savedFileName = 'Despacho_' + date + '.xlsx';
-    try {
-      const wb = XLSX.utils.book_new();
-      const ws = XLSX.utils.json_to_sheet(items);
-      XLSX.utils.book_append_sheet(wb, ws, 'Despacho');
-      XLSX.writeFile(wb, savedFileName);
-    } catch (e) {
-      console.warn('No se pudo generar el xlsx local:', e);
-      toast('❌ No se pudo generar el Excel — revisá la consola', 'error', 6000);
-    }
+    // No se generan descargas locales — se reintenta guardar en Drive.
+    // Los datos escaneados NO se pierden: quedan en currentDespacho para
+    // que "Finalizar Despacho" los vuelva a intentar subir.
+    console.warn('procesarExcel falló:', failReason);
+    toast('❌ No se guardó en Drive: ' + failReason, 'error', 9000);
+    setDespachoUI('retry'); // los items quedan en currentDespacho, listos para reintentar
   }
-
-  saveDespachoLog({
-    ts: new Date().toISOString(),
-    fileName: (state && state.fileName) || '',
-    count: n,
-    items,
-    savedTo,
-    savedFileName,
-  });
-
-  currentDespacho = [];
-  setDespachoUI('idle');
 }
 
 async function endDay() {
