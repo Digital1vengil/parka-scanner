@@ -534,6 +534,18 @@
 </div>
 
 <!-- ══════════════════════════════════════════
+     CONFIRM FINALIZAR CON PENDIENTES
+══════════════════════════════════════════ -->
+<div id="finalizar-pendientes-dialog" class="hidden confirm-backdrop">
+  <div class="confirm-sheet">
+    <p class="text-slate-800 font-bold text-lg mb-1">¿Finalizar con pendientes?</p>
+    <p id="finalizar-pendientes-body" class="text-slate-500 text-sm mb-6">Quedan paquetes sin despachar.</p>
+    <button id="finalizar-pendientes-ok" class="w-full bg-amber-600 active:bg-amber-700 text-white font-bold py-4 rounded-xl text-base mb-3">Finalizar de todos modos</button>
+    <button id="finalizar-pendientes-cancel" class="w-full bg-slate-100 active:bg-slate-200 text-slate-600 font-semibold py-4 rounded-xl text-base">Seguir escaneando</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════════════════
      DESPACHO PREVIEW MODAL (Historial → Ver detalles)
 ══════════════════════════════════════════ -->
 <div id="despacho-preview-dialog" class="hidden confirm-backdrop">
@@ -2122,10 +2134,40 @@ function iniciarDespacho() {
   startScanner(true); // única puerta de encendido de la cámara
 }
 
+function confirmFinalizarConPendientes(count) {
+  return new Promise((resolve) => {
+    const dlg = document.getElementById('finalizar-pendientes-dialog');
+    const okBtn = document.getElementById('finalizar-pendientes-ok');
+    const cancelBtn = document.getElementById('finalizar-pendientes-cancel');
+    document.getElementById('finalizar-pendientes-body').textContent =
+      `Quedan ${count} paquete${count !== 1 ? 's' : ''} sin despachar. ¿Querés finalizar igual?`;
+    const cleanup = (result) => {
+      dlg.classList.add('hidden');
+      okBtn.removeEventListener('click', onOk);
+      cancelBtn.removeEventListener('click', onCancel);
+      resolve(result);
+    };
+    const onOk     = () => cleanup(true);
+    const onCancel = () => cleanup(false);
+    okBtn.addEventListener('click', onOk);
+    cancelBtn.addEventListener('click', onCancel);
+    dlg.classList.remove('hidden');
+  });
+}
+
 async function finalizarDespacho() {
   if (currentDespacho.length === 0) {
     toast('No hay paquetes escaneados en este despacho', 'warn'); return;
   }
+
+  // Todo el universo de paquetes a despachar (no solo lo escaneado en esta sesión).
+  const allPackages = (state && Array.isArray(state.packages)) ? state.packages : [];
+  const pendings     = allPackages.filter(p => p.estado !== 'despachado');
+  if (pendings.length > 0) {
+    const proceed = await confirmFinalizarConPendientes(pendings.length);
+    if (!proceed) return; // sigue escaneando, no se toca nada
+  }
+
   despachoActive = false;
   setDespachoUI('saving');
 
@@ -2133,7 +2175,17 @@ async function finalizarDespacho() {
   await stopScannerAndRelease();
 
   const n       = currentDespacho.length;
-  const items   = currentDespacho.slice(); // snapshot for the excel + history log
+  const items   = currentDespacho.slice(); // snapshot para el historial local (solo lo escaneado)
+  // Reporte a Drive: TODOS los paquetes (despachados y pendientes), con estado e ID de venta.
+  const reportItems = allPackages.map((p, i) => ({
+    'Paquetes Despachados': i + 1,
+    'Numero de Etiqueta':   p.trackingId || '',
+    'ID de Venta':          p.ventaId || '',
+    'Nombre de la Persona': p.comprador || '',
+    'Cantidad de Prendas':  p.cantidad || 1,
+    'SKU Despachados':      p.sku || p.producto || '',
+    'Estado':               p.estado === 'despachado' ? 'despachado' : 'pendiente',
+  }));
   const date    = new Date().toISOString().split('T')[0];
   // gdrivePost returns true on HTTP 200 but we need the JSON response
   const url = getGDriveUrl();
@@ -2147,7 +2199,7 @@ async function finalizarDespacho() {
       const r = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'procesarExcel', data: { datos: items, fecha: date } }),
+        body: JSON.stringify({ action: 'procesarExcel', data: { datos: reportItems, fecha: date } }),
         redirect: 'follow',
       });
       if (!r.ok) {
