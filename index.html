@@ -196,6 +196,11 @@
         </div>
         <button id="btn-refresh-drive-files" class="text-forest-600 text-xs font-semibold active:opacity-60 flex items-center gap-1"><i data-lucide="refresh-cw" class="icon" style="width:14px;height:14px;"></i> Actualizar</button>
       </div>
+      <!-- Selector de tipo para dividir la carga de archivos (Flex / Colecta) -->
+      <div class="flex bg-slate-100 rounded-full p-0.5 gap-0.5 mb-3">
+        <button id="btn-drive-colecta" class="flex-1 text-xs font-bold px-3 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="barcode" class="icon" style="width:14px;height:14px;"></i> Colecta</button>
+        <button id="btn-drive-flex" class="flex-1 text-xs font-bold px-3 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="qr-code" class="icon" style="width:14px;height:14px;"></i> Flex</button>
+      </div>
       <div id="drive-files-list" class="space-y-2"></div>
       <p class="text-slate-400 text-xs mt-2 text-center">
         Subí tus archivos ZPL / CSV / Excel a la carpeta
@@ -624,6 +629,8 @@ function resolveDispatchType() {
       || restoreDispatchType()
       || 'flex';
 }
+// Tipo seleccionado para navegar/cargar archivos en Drive (Flex vs Colecta).
+let driveTipo = (localStorage.getItem(DISPATCH_TYPE_KEY) === 'colecta') ? 'colecta' : 'flex';
 
 let currentTab = 'pending';
 let audioCtx = null;
@@ -741,6 +748,29 @@ function fmtSize(b) {
 // Selección múltiple de archivos en el browser de Drive (por carpeta/día)
 const driveSelection = new Set(); // guarda "date::fileId"
 
+function updateDriveTipoUI() {
+  const bc = document.getElementById('btn-drive-colecta');
+  const bf = document.getElementById('btn-drive-flex');
+  if (bc) {
+    if (driveTipo === 'colecta') { bc.style.backgroundColor = '#2563eb'; bc.style.color = '#fff'; bc.classList.remove('text-slate-500'); }
+    else { bc.style.backgroundColor = ''; bc.style.color = ''; bc.classList.add('text-slate-500'); }
+  }
+  if (bf) {
+    if (driveTipo === 'flex') { bf.style.backgroundColor = '#7c3aed'; bf.style.color = '#fff'; bf.classList.remove('text-slate-500'); }
+    else { bf.style.backgroundColor = ''; bf.style.color = ''; bf.classList.add('text-slate-500'); }
+  }
+}
+
+// Cambia el tipo del navegador de archivos y recarga la lista de esa carpeta.
+// Mantiene el tipo de despacho en sync para que todo quede coherente.
+function setDriveTipo(tipo) {
+  driveTipo = tipo;
+  dispatchType = tipo;
+  persistDispatchType(tipo);
+  updateDriveTipoUI();
+  loadDriveFiles();
+}
+
 async function loadDriveFiles() {
   const zone = document.getElementById('drive-files-zone');
   const list = document.getElementById('drive-files-list');
@@ -751,7 +781,7 @@ async function loadDriveFiles() {
   list.innerHTML = '<p class="text-slate-400 text-xs text-center py-3 animate-pulse">Buscando archivos en Drive…</p>';
   driveSelection.clear();
 
-  const resp = await gdriveGet('listFiles');
+  const resp = await gdriveGet('listFiles', { tipo: driveTipo });
   // Support both old array format and new { rootFolderUrl, groups } format
   let groups, rootFolderUrl;
   if (Array.isArray(resp)) {
@@ -777,7 +807,7 @@ async function loadDriveFiles() {
         <p class="text-slate-500 text-sm mb-1">Sin archivos todavía</p>
         <p class="text-slate-400 text-xs">
           Subí tus archivos ZPL / CSV a la carpeta de hoy en Drive:<br>
-          <span class="text-forest-600 font-semibold">📁 PARKA Despacho / ${today}</span>
+          <span class="text-forest-600 font-semibold">📁 PARKA Despacho / ${driveTipo === 'flex' ? 'Flex' : 'Colecta'} / ${today}</span>
         </p>
       </div>`;
     return;
@@ -2847,6 +2877,9 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-start').addEventListener('click', startDispatch);
 
   // ── Drive files ────────────────────────────
+  updateDriveTipoUI();
+  document.getElementById('btn-drive-colecta')?.addEventListener('click', () => setDriveTipo('colecta'));
+  document.getElementById('btn-drive-flex')?.addEventListener('click', () => setDriveTipo('flex'));
   loadDriveFiles();
   document.getElementById('btn-refresh-drive-files').addEventListener('click', loadDriveFiles);
 
