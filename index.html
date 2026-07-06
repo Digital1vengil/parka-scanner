@@ -600,6 +600,26 @@ let scanMode = 'barcode'; // 'barcode' or 'qr'
 let currentDespacho = [];
 let despachoActive  = false;
 let dispatchType = null; // 'flex' o 'colecta'
+// Persistencia del tipo de despacho (Flex/Colecta) — sobrevive a refrescos y
+// a la restauracion de sesion, para que el reporte SIEMPRE se guarde en la
+// carpeta correcta (Flex/ o Colecta/).
+const DISPATCH_TYPE_KEY = 'parka_dispatch_type';
+function persistDispatchType(t) {
+  if (t === 'flex' || t === 'colecta') localStorage.setItem(DISPATCH_TYPE_KEY, t);
+  else localStorage.removeItem(DISPATCH_TYPE_KEY);
+}
+function restoreDispatchType() {
+  const t = localStorage.getItem(DISPATCH_TYPE_KEY);
+  if (t === 'flex' || t === 'colecta') dispatchType = t;
+  return dispatchType;
+}
+// Resuelve el tipo efectivo con fallbacks (memoria -> sesion -> storage).
+function resolveDispatchType() {
+  return dispatchType
+      || (state && state.dispatchType)
+      || restoreDispatchType()
+      || 'flex';
+}
 
 let currentTab = 'pending';
 let audioCtx = null;
@@ -1027,6 +1047,8 @@ function saveState() {
 function clearState() {
   localStorage.removeItem(LS_KEY);
   state = null;
+  dispatchType = null;
+  persistDispatchType(null);
   if (getGDriveUrl()) {
     gdrivePost('clearSession', null);
   } else {
@@ -2231,6 +2253,7 @@ function startDispatch() {
     fileName: parsedFile.fileName,
     startedAt: new Date().toISOString(),
     packages,
+    dispatchType: dispatchType,
     sourceFiles: [{ name: parsedFile.fileName, count: packages.length, added: packages.length, addedAt: new Date().toISOString() }],
     _completionNotified: false,
   };
@@ -2280,6 +2303,7 @@ async function beginDay() {
   // Mostrar modal de selección de tipo
   dispatchType = await showSelectTipoDialog();
   if (!dispatchType) return;
+  persistDispatchType(dispatchType);
 
   const btn = document.getElementById('btn-begin-day');
   if (btn) { btn.textContent = '⏳ Creando carpeta…'; btn.disabled = true; }
@@ -2292,6 +2316,7 @@ async function beginDay() {
   } else {
     toast('No se pudo crear la carpeta — verificá la conexión', 'error');
     dispatchType = null;
+    persistDispatchType(null);
   }
 }
 
@@ -2423,7 +2448,7 @@ async function finalizarDespacho() {
       const r = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-        body: JSON.stringify({ action: 'procesarExcel', data: { datos: reportItems, fecha: date }, tipo: dispatchType || 'flex' }),
+        body: JSON.stringify({ action: 'procesarExcel', data: { datos: reportItems, fecha: date }, tipo: resolveDispatchType() }),
         redirect: 'follow',
       });
       if (!r.ok) {
@@ -2500,7 +2525,7 @@ async function endDay() {
     const wbBinary = XLSX.write(wb, { bookType: 'xlsx', type: 'base64' });
     const btn = document.getElementById('btn-end-day');
     if (btn) { btn.textContent = '⏳ Guardando…'; btn.disabled = true; }
-    const ok = await gdrivePost('saveReport', { fileName, content: wbBinary, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const ok = await gdrivePost('saveReport', { fileName, content: wbBinary, mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }, resolveDispatchType());
     if (btn) { btn.textContent = '📋 Fin del día'; btn.disabled = false; }
     if (ok) toast(`✅ Reporte guardado en Drive: ${fileName}`, 'ok', 5000);
     else toast('⚠️ Reporte descargado localmente (Drive no disponible)', 'info', 4000);
@@ -2694,6 +2719,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const done  = active.packages.filter(p => p.estado === 'despachado').length;
       const total = active.packages.length;
       state = active;
+      if (active.dispatchType === 'flex' || active.dispatchType === 'colecta') {
+        dispatchType = active.dispatchType; persistDispatchType(dispatchType);
+      } else { restoreDispatchType(); }
       localStorage.setItem(LS_KEY, JSON.stringify(state));
       showScreen('screen-scanner');
       refreshUI();
@@ -2707,7 +2735,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('btn-resume').addEventListener('click', () => {
     const s = loadState(); if (!s) return;
-    state = s; showScreen('screen-scanner'); refreshUI();
+    state = s;
+    if (s.dispatchType === 'flex' || s.dispatchType === 'colecta') {
+      dispatchType = s.dispatchType; persistDispatchType(dispatchType);
+    } else { restoreDispatchType(); }
+    showScreen('screen-scanner'); refreshUI();
   });
   document.getElementById('btn-new-session').addEventListener('click', () => {
     clearState();
@@ -2953,10 +2985,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const refreshDriveBtn = document.getElementById('btn-refresh-drive-files');
   if (refreshDriveBtn) refreshDriveBtn.addEventListener('click', loadDriveFiles);
 
-  document.getElementById('btn-begin-day')?.addEventListener('click', beginDay);
+  // (listener de btn-begin-day ya registrado más arriba — no duplicar)
   document.getElementById('btn-end-day')?.addEventListener('click', endDay);
 
 });
 </script>
 </body>
-</html>                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            
+</html>
