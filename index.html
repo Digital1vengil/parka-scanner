@@ -498,8 +498,11 @@
     <button id="btn-fab-toggle" class="flex-shrink-0 bg-white active:bg-slate-100 border border-slate-200 text-slate-600 w-12 h-12 rounded-full shadow-sm flex items-center justify-center" aria-label="Más acciones">
       <i data-lucide="plus" class="icon" style="width:22px;height:22px;"></i>
     </button>
-    <button id="btnIniciar" class="flex-1 bg-forest-600 active:bg-forest-700 text-white font-bold py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-2 text-sm">
-      <i data-lucide="rocket" class="icon"></i> Iniciar Despacho
+    <button id="btnIniciarColecta" class="flex-1 bg-blue-600 active:bg-blue-700 text-white font-bold py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-1.5 text-xs">
+      <i data-lucide="barcode" class="icon"></i> Iniciar Colecta
+    </button>
+    <button id="btnIniciarFlex" class="flex-1 bg-purple-600 active:bg-purple-700 text-white font-bold py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-1.5 text-xs">
+      <i data-lucide="qr-code" class="icon"></i> Iniciar Flex
     </button>
     <button id="btnFinalizar" disabled class="flex-1 bg-amber-500 active:bg-amber-600 text-black font-bold py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-2 text-sm opacity-40 cursor-not-allowed">
       <i data-lucide="check-circle" class="icon"></i> Finalizar Despacho
@@ -2322,26 +2325,36 @@ async function beginDay() {
 
 // INICIAR / FINALIZAR DESPACHO
 function setDespachoUI(phase) {
-  var bIni = document.getElementById('btnIniciar');
+  var bCol = document.getElementById('btnIniciarColecta');
+  var bFlx = document.getElementById('btnIniciarFlex');
   var bFin = document.getElementById('btnFinalizar');
-  if (!bIni || !bFin) return;
+  if (!bFin) return;
   const ic = (name) => `<i data-lucide="${name}" class="icon"></i>`;
+  const setIni = (disabled) => {
+    [bCol, bFlx].forEach(function(b) {
+      if (!b) return;
+      b.disabled = disabled;
+      b.classList.toggle('opacity-40', disabled);
+      b.classList.toggle('cursor-not-allowed', disabled);
+    });
+  };
   if (phase === 'idle') {
-    bIni.disabled = false; bIni.classList.remove('opacity-40','cursor-not-allowed');
+    setIni(false);
+    if (bCol) bCol.innerHTML = ic('barcode') + ' Iniciar Colecta';
+    if (bFlx) bFlx.innerHTML = ic('qr-code') + ' Iniciar Flex';
     bFin.disabled = true;  bFin.classList.add('opacity-40','cursor-not-allowed');
-    bIni.innerHTML = ic('rocket') + ' Iniciar Despacho';
     bFin.innerHTML = ic('check-circle') + ' Finalizar Despacho';
   } else if (phase === 'active') {
-    bIni.disabled = true;  bIni.classList.add('opacity-40','cursor-not-allowed');
+    setIni(true);
+    if (dispatchType === 'colecta' && bCol) bCol.innerHTML = ic('circle-dot') + ' Colecta activo';
+    if (dispatchType === 'flex'    && bFlx) bFlx.innerHTML = ic('circle-dot') + ' Flex activo';
     bFin.disabled = false; bFin.classList.remove('opacity-40','cursor-not-allowed');
-    bIni.innerHTML = ic('circle-dot') + ' Despacho activo';
   } else if (phase === 'saving') {
-    bIni.disabled = true; bFin.disabled = true;
+    setIni(true); bFin.disabled = true;
     bFin.innerHTML = ic('loader-circle') + ' Guardando…';
   } else if (phase === 'retry') {
-    // Falló el guardado en Drive. No se descarga nada localmente:
-    // los items quedan en currentDespacho para reintentar con el mismo botón.
-    bIni.disabled = true;  bIni.classList.add('opacity-40','cursor-not-allowed');
+    // Falló el guardado en Drive. Los items quedan en currentDespacho para reintentar.
+    setIni(true);
     bFin.disabled = false; bFin.classList.remove('opacity-40','cursor-not-allowed');
     bFin.innerHTML = ic('refresh-cw') + ' Reintentar guardar en Drive';
   }
@@ -2357,6 +2370,20 @@ function iniciarDespacho() {
   despachoActive  = true;
   setDespachoUI('active');
   const tipoLabel = dispatchType === 'flex' ? 'Flex (QR)' : 'Colecta (Código de barras)';
+  toast(`🚀 ${tipoLabel} iniciado — escaneá los paquetes`, 'ok', 3000);
+  startScanner(true); // única puerta de encendido de la cámara
+}
+
+// Inicia el despacho con un tipo explícito (desde los botones Iniciar Flex / Iniciar Colecta).
+// Fija y persiste el tipo, arranca el tracking y enciende la cámara.
+function iniciarDespachoTipo(tipo) {
+  dispatchType = tipo;
+  persistDispatchType(tipo);
+  if (state) { state.dispatchType = tipo; saveState(); }
+  currentDespacho = [];
+  despachoActive  = true;
+  setDespachoUI('active');
+  const tipoLabel = tipo === 'flex' ? 'Flex (QR)' : 'Colecta (Código de barras)';
   toast(`🚀 ${tipoLabel} iniciado — escaneá los paquetes`, 'ok', 3000);
   startScanner(true); // única puerta de encendido de la cámara
 }
@@ -2908,7 +2935,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btn-begin-day')?.addEventListener('click', beginDay);
-  document.getElementById('btnIniciar')?.addEventListener('click', iniciarDespacho);
+  document.getElementById('btnIniciarColecta')?.addEventListener('click', () => { setScanMode('barcode'); iniciarDespachoTipo('colecta'); });
+  document.getElementById('btnIniciarFlex')?.addEventListener('click', () => { setScanMode('qr'); iniciarDespachoTipo('flex'); });
   document.getElementById('btnFinalizar')?.addEventListener('click', finalizarDespacho);
 
   // Botones del modal de selección de tipo (Flex/Colecta)
