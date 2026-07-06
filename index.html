@@ -201,6 +201,10 @@
         <button id="btn-drive-colecta" class="flex-1 text-xs font-bold px-3 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="barcode" class="icon" style="width:14px;height:14px;"></i> Colecta</button>
         <button id="btn-drive-flex" class="flex-1 text-xs font-bold px-3 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="qr-code" class="icon" style="width:14px;height:14px;"></i> Flex</button>
       </div>
+      <div class="relative mb-3">
+        <input id="drive-search" type="search" placeholder="Buscar archivo o fecha…" class="w-full bg-slate-100 text-slate-800 text-xs rounded-xl pl-8 pr-3 py-2 border border-slate-200 focus:outline-none focus:border-forest-500 placeholder-slate-500">
+        <i data-lucide="search" class="icon text-slate-400" style="width:14px;height:14px;position:absolute;left:10px;top:50%;transform:translateY(-50%);"></i>
+      </div>
       <div id="drive-files-list" class="space-y-2"></div>
       <p class="text-slate-400 text-xs mt-2 text-center">
         Subí tus archivos ZPL / CSV / Excel a la carpeta
@@ -631,6 +635,7 @@ function resolveDispatchType() {
 }
 // Tipo seleccionado para navegar/cargar archivos en Drive (Flex vs Colecta).
 let driveTipo = (localStorage.getItem(DISPATCH_TYPE_KEY) === 'colecta') ? 'colecta' : 'flex';
+let driveSearchQuery = '';
 
 let currentTab = 'pending';
 let audioCtx = null;
@@ -748,6 +753,37 @@ function fmtSize(b) {
 // Selección múltiple de archivos en el browser de Drive (por carpeta/día)
 const driveSelection = new Set(); // guarda "date::fileId"
 
+// Filtra la lista de archivos de Drive por nombre o fecha, y expande las carpetas con coincidencias.
+function filterDriveFiles() {
+  const list = document.getElementById('drive-files-list');
+  if (!list) return;
+  const q = (driveSearchQuery || '').trim().toLowerCase();
+  list.querySelectorAll('.drive-folder-group').forEach(function(group) {
+    const header = group.querySelector('.drive-folder-toggle');
+    const dateText = header ? header.textContent.toLowerCase() : '';
+    const body = group.querySelector('.drive-folder-body');
+    const chevron = header ? header.querySelector('.folder-chevron') : null;
+    let anyVisible = false;
+    group.querySelectorAll('.drive-file-row').forEach(function(row) {
+      const btn = row.querySelector('.drive-file-btn');
+      const name = (btn && btn.dataset.fileName ? btn.dataset.fileName : '').toLowerCase();
+      const match = !q || name.indexOf(q) !== -1 || dateText.indexOf(q) !== -1;
+      row.style.display = match ? '' : 'none';
+      if (match) anyVisible = true;
+    });
+    if (!q) {
+      group.style.display = '';
+      if (body) body.classList.add('hidden');
+      if (chevron) chevron.setAttribute('data-lucide', 'chevron-right');
+    } else {
+      group.style.display = anyVisible ? '' : 'none';
+      if (body && anyVisible) body.classList.remove('hidden');
+      if (chevron && anyVisible) chevron.setAttribute('data-lucide', 'chevron-down');
+    }
+  });
+  if (window.lucide) lucide.createIcons();
+}
+
 function updateDriveTipoUI() {
   const bc = document.getElementById('btn-drive-colecta');
   const bf = document.getElementById('btn-drive-flex');
@@ -781,7 +817,7 @@ async function loadDriveFiles() {
   list.innerHTML = '<p class="text-slate-400 text-xs text-center py-3 animate-pulse">Buscando archivos en Drive…</p>';
   driveSelection.clear();
 
-  const resp = await gdriveGet('listFiles', { tipo: driveTipo });
+  const resp = await gdriveGet('listFiles', { tipo: driveTipo, _ts: Date.now() });
   // Support both old array format and new { rootFolderUrl, groups } format
   let groups, rootFolderUrl;
   if (Array.isArray(resp)) {
@@ -924,6 +960,7 @@ async function loadDriveFiles() {
   });
 
   if (window.lucide) lucide.createIcons();
+  filterDriveFiles();
 }
 
 async function loadFileFromDrive(fileId, fileName, btn) {
@@ -2878,6 +2915,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── Drive files ────────────────────────────
   updateDriveTipoUI();
+  document.getElementById('drive-search')?.addEventListener('input', function(e) { driveSearchQuery = e.target.value; filterDriveFiles(); });
   document.getElementById('btn-drive-colecta')?.addEventListener('click', () => setDriveTipo('colecta'));
   document.getElementById('btn-drive-flex')?.addEventListener('click', () => setDriveTipo('flex'));
   loadDriveFiles();
