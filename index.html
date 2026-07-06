@@ -2257,20 +2257,42 @@ function showSelectTipoDialog() {
     const colectaBtn = document.getElementById('tipo-colecta-btn');
     const flexBtn = document.getElementById('tipo-flex-btn');
 
+    if (!dlg || !colectaBtn || !flexBtn) {
+      console.error('Modal elements not found:', { dlg, colectaBtn, flexBtn });
+      toast('Error: Modal no encontrado', 'error');
+      resolve(null);
+      return;
+    }
+
     const cleanup = (tipo) => {
-      dlg.classList.add('hidden');
-      colectaBtn.removeEventListener('click', onColecta);
-      flexBtn.removeEventListener('click', onFlex);
+      try {
+        dlg.classList.add('hidden');
+        colectaBtn.removeEventListener('click', onColecta);
+        flexBtn.removeEventListener('click', onFlex);
+      } catch (e) {
+        console.error('Error cleaning up dialog:', e);
+      }
       resolve(tipo);
     };
 
-    const onColecta = () => cleanup('colecta');
-    const onFlex = () => cleanup('flex');
+    const onColecta = () => {
+      console.log('Seleccionado: Colecta');
+      cleanup('colecta');
+    };
+    const onFlex = () => {
+      console.log('Seleccionado: Flex');
+      cleanup('flex');
+    };
 
-    colectaBtn.addEventListener('click', onColecta);
-    flexBtn.addEventListener('click', onFlex);
-    dlg.classList.remove('hidden');
-    if (window.lucide) lucide.createIcons();
+    try {
+      colectaBtn.addEventListener('click', onColecta);
+      flexBtn.addEventListener('click', onFlex);
+      dlg.classList.remove('hidden');
+      if (window.lucide) lucide.createIcons();
+    } catch (e) {
+      console.error('Error in showSelectTipoDialog:', e);
+      resolve(null);
+    }
   });
 }
 
@@ -2616,4 +2638,347 @@ function hidCommit() {
 document.addEventListener('keydown', function(e) {
   if (!document.getElementById('screen-scanner').classList.contains('active')) return;
   const now = Date.now();
-  const isManualFocused 
+  const isManualFocused = document.activeElement === document.getElementById('manual-input');
+  const isFast = (now - hidLastKey) < HID_SPEED_MS;
+  if (isManualFocused && !isFast && !hidActive) return;
+
+  if (e.key === 'Enter' || e.key === 'Tab') {
+    if (hidBuffer.length >= 4) {
+      e.preventDefault();
+      hidFlash();
+      hidCommit();
+    } else {
+      hidBuffer = ''; hidActive = false;
+    }
+    hidLastKey = now;
+    return;
+  }
+
+  if (e.key.length === 1) {
+    hidBuffer += e.key;
+    hidLastKey = now;
+    hidActive  = true;
+    clearTimeout(hidTimer);
+    hidTimer = setTimeout(() => {
+      if (hidBuffer.length >= 6) hidCommit();
+      else { hidBuffer = ''; hidActive = false; }
+    }, HID_TIMEOUT);
+    if (isManualFocused && isFast) {
+      e.preventDefault();
+      document.getElementById('manual-input').blur();
+    }
+  }
+});
+
+// ─────────────────────────────────────────────
+// PWA INSTALL PROMPT
+// ─────────────────────────────────────────────
+let deferredInstallPrompt = null;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  const btn = document.getElementById('btn-install');
+  if (btn) btn.classList.remove('hidden');
+});
+
+window.addEventListener('appinstalled', () => {
+  deferredInstallPrompt = null;
+  const btn = document.getElementById('btn-install');
+  if (btn) btn.classList.add('hidden');
+  toast('✅ App instalada correctamente', 'ok', 4000);
+});
+
+// ─────────────────────────────────────────────
+// EXPOSE to HTML onclick attributes
+// ─────────────────────────────────────────────
+const App = {
+  switchTab,
+  confirmReset,
+  closeMenu,
+};
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  if (window.lucide) lucide.createIcons();
+  fixVh();
+  window.addEventListener('resize',            fixVh);
+  window.addEventListener('orientationchange', () => setTimeout(fixVh, 200));
+
+  // ── Auto-resume: server first, localStorage fallback ──
+  (async () => {
+    let active = await loadServerSession();
+    if (!active) active = loadState();
+
+    if (active && active.packages && active.packages.length > 0) {
+      const done  = active.packages.filter(p => p.estado === 'despachado').length;
+      const total = active.packages.length;
+      state = active;
+      localStorage.setItem(LS_KEY, JSON.stringify(state));
+      showScreen('screen-scanner');
+      refreshUI();
+      // Cámara apagada — se enciende solo al presionar "Iniciar Despacho".
+      toast(`📦 ${active.fileName || 'Sesión'} — ${done}/${total} despachados`, 'info', 3000);
+    } else {
+      const hist = await loadHistory();
+      renderHistory(hist);
+    }
+  })();
+
+  document.getElementById('btn-resume').addEventListener('click', () => {
+    const s = loadState(); if (!s) return;
+    state = s; showScreen('screen-scanner'); refreshUI();
+  });
+  document.getElementById('btn-new-session').addEventListener('click', () => {
+    clearState();
+    document.getElementById('resume-banner').classList.add('hidden');
+    toast('Sesión anterior descartada', 'info');
+    loadHistory().then(renderHistory);
+  });
+
+  // ── History clear button ───────────────────
+  document.getElementById('btn-clear-history').addEventListener('click', async () => {
+    await clearHistory();
+    toast('Historial borrado', 'info');
+  });
+
+  // ── Historial de despachos (local) ─────────
+  renderDespachoHistory();
+  document.getElementById('btn-clear-despacho-log')?.addEventListener('click', () => {
+    localStorage.removeItem(DESPACHO_LOG_KEY);
+    renderDespachoHistory();
+    toast('Historial de despachos borrado', 'info');
+  });
+  document.getElementById('despacho-preview-close')?.addEventListener('click', closeDespachoPreview);
+
+  // ── File upload zone (local upload removed — Drive only) ──
+  const uploadZone = document.getElementById('upload-zone'); // null when removed
+  const fileInput  = document.getElementById('file-input');
+
+  if (uploadZone) uploadZone.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', async () => {
+    if (fileInput.files.length === 0) return;
+    if (fileInput.files.length === 1) {
+      handleFile(fileInput.files[0]);
+    } else {
+      // Multiple files: process first one normally, then merge the rest
+      await new Promise(resolve => {
+        const origStartDispatch = window._origStartDispatch;
+        // Process first file — for ZPL it auto-starts dispatch, for CSV user still needs to click
+        handleFile(fileInput.files[0]);
+        resolve();
+      });
+      // For ZPL multi-select: state is set immediately; merge remaining files
+      const extraFiles = Array.from(fileInput.files).slice(1);
+      if (extraFiles.length > 0 && state) {
+        await addFilesToSession(extraFiles);
+      } else if (extraFiles.length > 0) {
+        // CSV first file — queue remaining files for after dispatch starts
+        window._pendingExtraFiles = extraFiles;
+        toast('Carga el primer archivo y luego se agregaran los ' + extraFiles.length + ' archivos adicionales automaticamente', 'info', 5000);
+      }
+    }
+  });
+
+  if (uploadZone) {
+    uploadZone.addEventListener('dragover',  (e) => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+    uploadZone.addEventListener('dragleave', ()  => uploadZone.classList.remove('drag-over'));
+    uploadZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadZone.classList.remove('drag-over');
+      const file = e.dataTransfer.files[0];
+      if (file) handleFile(file);
+    });
+  }
+
+  document.getElementById('btn-change-file').addEventListener('click', () => {
+    document.getElementById('file-preview').classList.add('hidden');
+    parsedFile = null; fileInput.value = '';
+  });
+  document.getElementById('btn-change-file-csv').addEventListener('click', () => {
+    document.getElementById('file-preview').classList.add('hidden');
+    parsedFile = null; fileInput.value = '';
+  });
+
+  ['col-tracking','col-venta','col-comprador','col-producto'].forEach(id => {
+    document.getElementById(id).addEventListener('change', onColChange);
+  });
+
+  document.getElementById('btn-start').addEventListener('click', startDispatch);
+
+  // ── Drive files ────────────────────────────
+  loadDriveFiles();
+  document.getElementById('btn-refresh-drive-files').addEventListener('click', loadDriveFiles);
+
+  // ── Remote hosting detection ───────────────
+  // If not on localhost/LAN and Drive not configured, show warning.
+  (function detectRemote() {
+    const host = location.hostname;
+    const isLocal = host === 'localhost' || host === '127.0.0.1' || /^192\.168\.|^10\.|^172\.(1[6-9]|2\d|3[01])\./.test(host);
+    const banner  = document.getElementById('drive-required-banner');
+    if (!isLocal && !getGDriveUrl() && banner) {
+      banner.classList.remove('hidden');
+    }
+    // Hide banner once Drive is connected
+    const obs = new MutationObserver(() => {
+      if (getGDriveUrl() && banner) banner.classList.add('hidden');
+    });
+    const dot = document.getElementById('gdrive-status-dot');
+    if (dot) obs.observe(dot, { attributes: true });
+  })();
+
+  // ── Server files ───────────────────────────
+  loadServerFiles();
+  document.getElementById('btn-refresh-files').addEventListener('click', loadServerFiles);
+
+  // ── Scanner screen ─────────────────────────
+  document.getElementById('btn-menu').addEventListener('click', openMenu);
+  document.getElementById('menu-pause').addEventListener('click', toggleCamera);
+
+  document.getElementById('btn-resume-cam').addEventListener('click', () => {
+    startScanner(true);
+  });
+
+  const manualBar   = document.getElementById('manual-input-bar');
+  const manualInput = document.getElementById('manual-input');
+  document.getElementById('btn-manual-toggle').addEventListener('click', () => {
+    const open = manualBar.classList.toggle('open');
+    if (open) manualInput.focus();
+  });
+  document.getElementById('btn-manual-send').addEventListener('click', () => {
+    const v = manualInput.value.trim();
+    if (v) { processScan(v); manualInput.value = ''; }
+  });
+  manualInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const v = manualInput.value.trim();
+      if (v) { processScan(v); manualInput.value = ''; }
+    }
+  });
+
+  document.getElementById('btn-scanner-hid').addEventListener('click', () => {
+    toast('🔫 Pistola láser activa — apuntá y disparás, el código se procesa automáticamente', 'info', 4000);
+  });
+
+  function setScanMode(mode) {
+    scanMode = mode;
+    const bBar = document.getElementById('btn-mode-barcode');
+    const bQr  = document.getElementById('btn-mode-qr');
+    if (bBar) { bBar.className = mode === 'barcode' ? 'text-xs font-bold px-4 py-1.5 rounded-full bg-forest-600 text-white' : 'text-xs font-bold px-4 py-1.5 rounded-full text-slate-500'; }
+    if (bQr)  { bQr.className  = mode === 'qr'      ? 'text-xs font-bold px-4 py-1.5 rounded-full bg-forest-600 text-white' : 'text-xs font-bold px-4 py-1.5 rounded-full text-slate-500'; }
+    if (scannerRunning) startScanner(true);
+  }
+  document.getElementById('btn-mode-barcode')?.addEventListener('click', () => setScanMode('barcode'));
+  document.getElementById('btn-mode-qr')?.addEventListener('click', () => setScanMode('qr'));
+
+  // ── Secondary actions popup ("+" button) ──
+  document.getElementById('btn-fab-toggle')?.addEventListener('click', toggleFabMenu);
+  document.addEventListener('click', (e) => {
+    const menu = document.getElementById('fab-menu');
+    const toggleBtn = document.getElementById('btn-fab-toggle');
+    if (!menu || menu.classList.contains('hidden')) return;
+    if (menu.contains(e.target) || toggleBtn.contains(e.target)) return;
+    closeFabMenu();
+  });
+  ['btn-add-files', 'btn-manual-toggle', 'btn-scanner-hid', 'btn-export'].forEach(id => {
+    document.getElementById(id)?.addEventListener('click', closeFabMenu);
+  });
+
+  // ── Add files to active session ─────────────
+  const fileInputAdd = document.getElementById('file-input-add');
+  document.getElementById('btn-add-files')?.addEventListener('click', () => fileInputAdd.click());
+  fileInputAdd?.addEventListener('change', async () => {
+    if (fileInputAdd.files.length === 0) return;
+    const files = Array.from(fileInputAdd.files);
+    fileInputAdd.value = '';
+    if (!state) { toast('No hay sesion activa', 'error'); return; }
+    await addFilesToSession(files);
+  });
+
+  document.getElementById('btn-begin-day')?.addEventListener('click', beginDay);
+  document.getElementById('btnIniciar')?.addEventListener('click', iniciarDespacho);
+  document.getElementById('btnFinalizar')?.addEventListener('click', finalizarDespacho);
+
+  // Botones del modal de selección de tipo (Flex/Colecta)
+  // Nota: estos se wrapean en showSelectTipoDialog, no necesitan listeners aquí
+  // pero agregamos validación de que existan
+  if (!document.getElementById('tipo-colecta-btn') || !document.getElementById('tipo-flex-btn')) {
+    console.warn('Modal de Flex/Colecta no encontrado en el DOM');
+  }
+
+  setDespachoUI('idle');
+
+  document.getElementById('btn-export').addEventListener('click', exportReport);
+  document.getElementById('btn-list-expand')?.addEventListener('click', () => toggleListExpand());
+
+  document.getElementById('confirm-ok').addEventListener('click', doReset);
+  document.getElementById('confirm-cancel').addEventListener('click', () => {
+    document.getElementById('confirm-dialog').classList.add('hidden');
+  });
+
+  // ── PWA install button ─────────────────────
+  document.getElementById('btn-install').addEventListener('click', () => {
+    if (deferredPrompt) {
+      deferredPrompt.prompt();
+      deferredPrompt.userChoice.then(() => { deferredPrompt = null; });
+    }
+  });
+
+  // ── Google Drive Sync UI ──────────────────────
+  updateGDriveUI();
+
+  document.getElementById('btn-gdrive-connect').addEventListener('click', async () => {
+    const url = document.getElementById('gdrive-url-input').value.trim();
+    if (!url || !url.includes('script.google.com')) {
+      toast('URL inválida — debe ser una URL de Google Apps Script', 'error');
+      return;
+    }
+    const btn = document.getElementById('btn-gdrive-connect');
+    btn.textContent = 'Verificando…';
+    btn.disabled = true;
+    const result = await testGDriveUrl(url);
+    btn.textContent = 'Conectar';
+    btn.disabled = false;
+    if (result.ok) {
+      setGDriveUrl(url);
+      updateGDriveUI();
+      const drBanner = document.getElementById('drive-required-banner');
+      if (drBanner) drBanner.classList.add('hidden');
+      toast('✅ Google Drive conectado — sesiones en la nube', 'ok', 3500);
+      loadDriveFiles();
+      loadHistory().then(renderHistory);
+    } else {
+      toast('❌ ' + (result.reason || 'No se pudo conectar'), 'error', 8000);
+    }
+  });
+
+  const testBtn = document.getElementById('btn-gdrive-test');
+  if (testBtn) testBtn.addEventListener('click', () => {
+    const url = document.getElementById('gdrive-url-input').value.trim();
+    if (!url || !url.includes('script.google.com')) { toast('Pega primero la URL del script', 'error'); return; }
+    window.open(url + '?action=ping', '_blank');
+    toast('Abri la pestana — si ves {"ok":true} el script funciona', 'ok', 6000);
+  });
+
+  document.getElementById('btn-gdrive-disconnect').addEventListener('click', () => {
+    setGDriveUrl('');
+    updateGDriveUI();
+    toast('Google Drive desconectado', 'info');
+  });
+
+  document.getElementById('btn-gdrive-help').addEventListener('click', () => {
+    document.getElementById('gdrive-help-panel').classList.toggle('hidden');
+  });
+
+  const refreshDriveBtn = document.getElementById('btn-refresh-drive-files');
+  if (refreshDriveBtn) refreshDriveBtn.addEventListener('click', loadDriveFiles);
+
+  document.getElementById('btn-begin-day')?.addEventListener('click', beginDay);
+  document.getElementById('btn-end-day')?.addEventListener('click', endDay);
+
+});
+</script>
+</body>
+</html>
