@@ -727,7 +727,14 @@ async function loadDriveFiles() {
   list.innerHTML = '<p class="text-slate-400 text-xs text-center py-3 animate-pulse">Buscando archivos en Drive…</p>';
   driveSelection.clear();
 
-  const resp = await gdriveGet('listFiles', { tipo: dispatchType || 'flex' });
+  // Intenta con el nuevo parámetro tipo, si falla retorna al comportamiento anterior
+  let resp = await gdriveGet('listFiles', { tipo: dispatchType || 'flex' });
+
+  // Si falla, intenta sin parámetro (compatibilidad con versión antigua del backend)
+  if (!resp) {
+    console.warn('listFiles falló con tipo, intentando sin parámetro');
+    resp = await gdriveGet('listFiles');
+  }
   // Support both old array format and new { rootFolderUrl, groups } format
   let groups, rootFolderUrl;
   if (Array.isArray(resp)) {
@@ -2972,13 +2979,4 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('gdrive-help-panel').classList.toggle('hidden');
   });
 
-  const refreshDriveBtn = document.getElementById('btn-refresh-drive-files');
-  if (refreshDriveBtn) refreshDriveBtn.addEventListener('click', loadDriveFiles);
-
-  document.getElementById('btn-begin-day')?.addEventListener('click', beginDay);
-  document.getElementById('btn-end-day')?.addEventListener('click', endDay);
-
-});
-</script>
-</body>
-</html>
+  const refreshDriveBtn = document.getEle
