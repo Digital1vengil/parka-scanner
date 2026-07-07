@@ -1637,7 +1637,9 @@ function parseTiendaNubeCSV(text) {
 
 function buildTiendaNubeFromRows(headerArr, dataRows) {
   const h = (headerArr || []).map(function(s) { return String(s).trim(); });
-  const idx = function(name) { return h.findIndex(function(c) { return c.trim().toLowerCase() === name.toLowerCase(); }); };
+  // Normaliza encabezados: ignora acentos/mojibake (Número, N�mero, Nãºmero -> nmero)
+  const normH = function(x) { return String(x).toLowerCase().replace(/[^a-z0-9]/g, ''); };
+  const idx = function(name) { return h.findIndex(function(c) { return normH(c) === normH(name); }); };
   const iO = idx('Número de orden');
   const iCE = idx('Nombre para el envío');
   const iC = idx('Nombre del comprador');
