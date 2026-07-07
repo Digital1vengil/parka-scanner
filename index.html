@@ -206,6 +206,9 @@
         <input id="drive-search" type="search" placeholder="Buscar archivo o fecha…" class="w-full bg-slate-100 text-slate-800 text-xs rounded-xl pl-8 pr-3 py-2 border border-slate-200 focus:outline-none focus:border-forest-500 placeholder-slate-500">
         <i data-lucide="search" class="icon text-slate-400" style="width:14px;height:14px;position:absolute;left:10px;top:50%;transform:translateY(-50%);"></i>
       </div>
+      <button id="btn-upload-pc" class="w-full mb-3 bg-forest-600 active:bg-forest-700 text-white font-semibold text-sm py-2.5 rounded-xl flex items-center justify-center gap-2">
+        <i data-lucide="upload" class="icon" style="width:16px;height:16px;"></i> Cargar archivo desde la PC
+      </button>
       <div id="drive-files-list" class="space-y-2"></div>
       <p class="text-slate-400 text-xs mt-2 text-center">
         Subí tus archivos ZPL / CSV / Excel a la carpeta
@@ -3065,6 +3068,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-drive-colecta')?.addEventListener('click', () => setDriveTipo('colecta'));
   document.getElementById('btn-drive-flex')?.addEventListener('click', () => setDriveTipo('flex'));
   document.getElementById('btn-drive-tiendanube')?.addEventListener('click', () => setDriveTipo('tiendanube'));
+  document.getElementById('btn-upload-pc')?.addEventListener('click', () => document.getElementById('file-input').click());
   document.getElementById('scanner-list-area')?.addEventListener('click', function(e) {
     if (!state || state.dispatchType !== 'tiendanube') return;
     const card = e.target.closest('.tn-card');
