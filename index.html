@@ -200,6 +200,7 @@
       <div class="flex bg-slate-100 rounded-full p-0.5 gap-0.5 mb-3">
         <button id="btn-drive-colecta" class="flex-1 text-xs font-bold px-3 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="barcode" class="icon" style="width:14px;height:14px;"></i> Colecta</button>
         <button id="btn-drive-flex" class="flex-1 text-xs font-bold px-3 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="qr-code" class="icon" style="width:14px;height:14px;"></i> Flex</button>
+        <button id="btn-drive-tiendanube" class="flex-1 text-xs font-bold px-2 py-1.5 rounded-full text-slate-500 flex items-center justify-center gap-1"><i data-lucide="shopping-bag" class="icon" style="width:14px;height:14px;"></i> Tienda Nube</button>
       </div>
       <div class="relative mb-3">
         <input id="drive-search" type="search" placeholder="Buscar archivo o fecha…" class="w-full bg-slate-100 text-slate-800 text-xs rounded-xl pl-8 pr-3 py-2 border border-slate-200 focus:outline-none focus:border-forest-500 placeholder-slate-500">
@@ -615,12 +616,12 @@ let dispatchType = null; // 'flex' o 'colecta'
 // carpeta correcta (Flex/ o Colecta/).
 const DISPATCH_TYPE_KEY = 'parka_dispatch_type';
 function persistDispatchType(t) {
-  if (t === 'flex' || t === 'colecta') localStorage.setItem(DISPATCH_TYPE_KEY, t);
+  if (t === 'flex' || t === 'colecta' || t === 'tiendanube') localStorage.setItem(DISPATCH_TYPE_KEY, t);
   else localStorage.removeItem(DISPATCH_TYPE_KEY);
 }
 function restoreDispatchType() {
   const t = localStorage.getItem(DISPATCH_TYPE_KEY);
-  if (t === 'flex' || t === 'colecta') dispatchType = t;
+  if (t === 'flex' || t === 'colecta' || t === 'tiendanube') dispatchType = t;
   return dispatchType;
 }
 // Resuelve el tipo efectivo con fallbacks (memoria -> sesion -> storage).
@@ -631,7 +632,7 @@ function resolveDispatchType() {
       || 'flex';
 }
 // Tipo seleccionado para navegar/cargar archivos en Drive (Flex vs Colecta).
-let driveTipo = (localStorage.getItem(DISPATCH_TYPE_KEY) === 'colecta') ? 'colecta' : 'flex';
+let driveTipo = (function(){ var t = localStorage.getItem(DISPATCH_TYPE_KEY); return (t === 'colecta' || t === 'tiendanube') ? t : 'flex'; })();
 let driveSearchQuery = '';
 
 let currentTab = 'pending';
@@ -782,16 +783,14 @@ function filterDriveFiles() {
 }
 
 function updateDriveTipoUI() {
-  const bc = document.getElementById('btn-drive-colecta');
-  const bf = document.getElementById('btn-drive-flex');
-  if (bc) {
-    if (driveTipo === 'colecta') { bc.style.backgroundColor = '#2563eb'; bc.style.color = '#fff'; bc.classList.remove('text-slate-500'); }
-    else { bc.style.backgroundColor = ''; bc.style.color = ''; bc.classList.add('text-slate-500'); }
-  }
-  if (bf) {
-    if (driveTipo === 'flex') { bf.style.backgroundColor = '#7c3aed'; bf.style.color = '#fff'; bf.classList.remove('text-slate-500'); }
-    else { bf.style.backgroundColor = ''; bf.style.color = ''; bf.classList.add('text-slate-500'); }
-  }
+  const map = { colecta: ['btn-drive-colecta', '#2563eb'], flex: ['btn-drive-flex', '#7c3aed'], tiendanube: ['btn-drive-tiendanube', '#0d9488'] };
+  Object.keys(map).forEach(function(k) {
+    const id = map[k][0], color = map[k][1];
+    const b = document.getElementById(id);
+    if (!b) return;
+    if (driveTipo === k) { b.style.backgroundColor = color; b.style.color = '#fff'; b.classList.remove('text-slate-500'); }
+    else { b.style.backgroundColor = ''; b.style.color = ''; b.classList.add('text-slate-500'); }
+  });
 }
 
 // Cambia el tipo del navegador de archivos y recarga la lista de esa carpeta.
@@ -1579,6 +1578,116 @@ function autoDetect(headers) {
   };
 }
 
+function readAsLatin1(file) {
+  return new Promise(function(resolve, reject) {
+    const r = new FileReader();
+    r.onload = function(e) { resolve(e.target.result); };
+    r.onerror = reject;
+    r.readAsText(file, 'ISO-8859-1');
+  });
+}
+
+function isTiendaNubeCSV(text) {
+  const firstLine = (text.split(/\r?\n/)[0] || '');
+  return firstLine.indexOf(';') !== -1 && /mero de orden/i.test(firstLine) && /tracking/i.test(firstLine);
+}
+
+function parseDelimited(text, delim) {
+  const rows = []; let row = []; let field = ''; let inQ = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQ) {
+      if (c === '"') { if (text[i + 1] === '"') { field += '"'; i++; } else inQ = false; }
+      else field += c;
+    } else {
+      if (c === '"') inQ = true;
+      else if (c === delim) { row.push(field); field = ''; }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else if (c === '\r') { /* skip */ }
+      else field += c;
+    }
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+
+function parseTiendaNubeCSV(text) {
+  const rows = parseDelimited(text, ';');
+  if (rows.length < 2) return [];
+  const h = rows[0].map(function(s) { return s.trim(); });
+  const idx = function(name) { return h.findIndex(function(c) { return c.trim().toLowerCase() === name.toLowerCase(); }); };
+  const iO = idx('Número de orden');
+  const iCE = idx('Nombre para el envío');
+  const iC = idx('Nombre del comprador');
+  const iSku = idx('SKU');
+  const iCant = idx('Cantidad del producto');
+  const iProd = idx('Nombre del producto');
+  const iTrk = idx('Código de tracking del envío');
+  const iMedio = idx('Medio de envío');
+  const iDir = idx('Dirección'); const iNum = idx('Número'); const iLoc = idx('Localidad'); const iCiu = idx('Ciudad'); const iCP = idx('Código postal');
+  const map = new Map();
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r]; if (!row || row.length < 2) continue;
+    const orden = iO >= 0 ? (row[iO] || '').trim() : ''; if (!orden) continue;
+    if (!map.has(orden)) map.set(orden, { orden: orden, comprador: '', productos: [], skus: [], cantidad: 0, tnTracking: '', medioEnvio: '', direccion: '' });
+    const g = map.get(orden);
+    let compr = '';
+    if (iCE >= 0 && row[iCE] && row[iCE].trim() && row[iCE].trim().toLowerCase() !== 'no informado') compr = row[iCE].trim();
+    else if (iC >= 0) compr = (row[iC] || '').trim();
+    if (!g.comprador && compr) g.comprador = compr;
+    const sku = iSku >= 0 ? (row[iSku] || '').trim() : ''; if (sku && g.skus.indexOf(sku) === -1) g.skus.push(sku);
+    const prod = iProd >= 0 ? (row[iProd] || '').trim() : ''; if (prod && g.productos.indexOf(prod) === -1) g.productos.push(prod);
+    let cant = iCant >= 0 ? parseInt(row[iCant] || '0', 10) : 0; if (isNaN(cant)) cant = 0; g.cantidad += cant;
+    const trk = iTrk >= 0 ? (row[iTrk] || '').replace(/[="]/g, '').trim() : ''; if (trk && !g.tnTracking) g.tnTracking = trk;
+    if (iMedio >= 0 && !g.medioEnvio) g.medioEnvio = (row[iMedio] || '').trim();
+    if (iDir >= 0 && !g.direccion) {
+      const parts = [ (row[iDir] || '').trim(), (iNum >= 0 ? (row[iNum] || '').trim() : ''), (iLoc >= 0 ? (row[iLoc] || '').trim() : ''), (iCiu >= 0 ? (row[iCiu] || '').trim() : ''), (iCP >= 0 ? ('CP ' + (row[iCP] || '').trim()) : '') ];
+      g.direccion = parts.filter(function(x) { return x && x !== 'CP '; }).join(' ');
+    }
+  }
+  return Array.from(map.values()).map(function(g) {
+    return {
+      trackingId: g.orden, orderNum: parseInt(g.orden, 10) || 0, ventaId: g.orden,
+      comprador: g.comprador, producto: g.productos.join(' + '), sku: g.skus.join(', '),
+      cantidad: g.cantidad || 1, tnTracking: g.tnTracking, medioEnvio: g.medioEnvio, direccion: g.direccion,
+      estado: 'pendiente', scannedAt: null, scannedCode: null
+    };
+  }).sort(function(a, b) { return a.orderNum - b.orderNum; });
+}
+
+function findTnPackage(id) {
+  if (!state) return null;
+  const raw = String(id).trim();
+  let pkg = state.packages.find(function(p) { return String(p.trackingId).trim() === raw; });
+  if (pkg) return pkg;
+  const norm = function(x) { return String(x || '').toUpperCase().replace(/[^A-Z0-9]/g, ''); };
+  const nid = norm(raw);
+  if (nid.length >= 6) {
+    pkg = state.packages.find(function(p) { const t = norm(p.tnTracking); return t && (t.indexOf(nid) === 0 || nid.indexOf(t) === 0); });
+    if (pkg) return pkg;
+  }
+  return null;
+}
+
+function renderTnCard(pkg) {
+  const done = pkg.estado === 'despachado';
+  const medio = pkg.medioEnvio ? ('<p class="text-slate-400 text-[11px] truncate">' + pkg.medioEnvio + '</p>') : '';
+  const skuLine = pkg.sku ? ('<p class="text-slate-500 text-xs truncate">' + pkg.sku + (pkg.cantidad > 1 ? '  ·  x' + pkg.cantidad : '') + '</p>') : '';
+  return '' +
+    '<div class="tn-card mx-3 my-2 ' + (done ? 'bg-green-50 border-green-200' : 'bg-white border-slate-200 active:bg-slate-50') + ' border rounded-2xl p-3 flex items-center gap-3" data-order="' + pkg.trackingId + '">' +
+      '<div class="w-7 h-7 rounded-lg border-2 ' + (done ? 'bg-green-600 border-green-600 text-white' : 'border-slate-300 text-transparent') + ' flex items-center justify-center flex-shrink-0 font-bold text-sm">' + (done ? '✓' : '') + '</div>' +
+      '<div class="flex-shrink-0 w-16 text-center">' +
+        '<p class="text-xl font-black ' + (done ? 'text-green-700' : 'text-slate-800') + ' leading-none">#' + pkg.trackingId + '</p>' +
+        '<p class="text-slate-400 text-[10px] mt-0.5 uppercase tracking-wider">orden</p>' +
+      '</div>' +
+      '<div class="flex-1 min-w-0">' +
+        '<p class="text-slate-800 font-semibold text-sm truncate">' + (pkg.comprador || '(sin nombre)') + '</p>' +
+        skuLine + medio +
+      '</div>' +
+      (done ? '<span class="text-green-600 text-xs font-bold flex-shrink-0">OK</span>' : '<span class="text-slate-300 text-lg flex-shrink-0">›</span>') +
+    '</div>';
+}
+
 function buildPackages(headers, data, colMap) {
   const idx = name => name ? headers.indexOf(name) : -1;
   const iT = idx(colMap.tracking);
@@ -1639,7 +1748,7 @@ function processScan(raw) {
   const id = extractId(raw);
   if (!id || !state) return;
 
-  const pkg = state.packages.find(p => p.trackingId === id);
+  const pkg = (state.dispatchType === 'tiendanube') ? findTnPackage(id) : state.packages.find(p => p.trackingId === id);
 
   if (!pkg) {
     beepError();
@@ -1779,12 +1888,17 @@ function refreshUI() {
   // Lists
   const lp = document.getElementById('list-pending');
   const ld = document.getElementById('list-dispatched');
-  lp.innerHTML = pending.length
-    ? pending.map(renderCard).join('')
-    : '<p class="text-center text-slate-400 py-14 text-base">🎉 ¡Todos los paquetes despachados!</p>';
-  ld.innerHTML = dispatched.length
-    ? [...dispatched].reverse().map(renderCard).join('')
-    : '<p class="text-center text-slate-400 py-14 text-sm">Todavía no hay paquetes despachados</p>';
+  const isTN = state.dispatchType === 'tiendanube';
+  const cardFn = isTN ? renderTnCard : renderCard;
+  const byOrder = (a, b) => (a.orderNum || parseInt(a.trackingId) || 0) - (b.orderNum || parseInt(b.trackingId) || 0);
+  const pendingArr    = isTN ? [...pending].sort(byOrder)    : pending;
+  const dispatchedArr = isTN ? [...dispatched].sort(byOrder) : [...dispatched].reverse();
+  lp.innerHTML = pendingArr.length
+    ? pendingArr.map(cardFn).join('')
+    : '<p class="text-center text-slate-400 py-14 text-base">🎉 ¡Todo despachado!</p>';
+  ld.innerHTML = dispatchedArr.length
+    ? dispatchedArr.map(cardFn).join('')
+    : '<p class="text-center text-slate-400 py-14 text-sm">Todavía no hay nada despachado</p>';
 }
 
 // ─────────────────────────────────────────────
@@ -2163,7 +2277,20 @@ async function handleFile(file) {
     reader.readAsText(file, 'UTF-8');
 
   } else {
-    // ── CSV / Excel path ──────────────────────
+    // ── Tienda Nube CSV? (se detecta por encabezados) ──
+    try {
+      const rawTN = await readAsLatin1(file);
+      if (isTiendaNubeCSV(rawTN)) {
+        const pkgs = parseTiendaNubeCSV(rawTN);
+        if (!pkgs.length) { toast('CSV de Tienda Nube sin órdenes válidas', 'error', 5000); return; }
+        dispatchType = 'tiendanube'; persistDispatchType('tiendanube'); driveTipo = 'tiendanube'; updateDriveTipoUI();
+        parsedFile = { type: 'tiendanube', packages: pkgs, fileName: file.name };
+        toast('✅ ' + pkgs.length + ' órdenes de Tienda Nube — iniciando…', 'ok', 2500);
+        startDispatch();
+        return;
+      }
+    } catch (e) { console.warn('TN detect:', e); }
+    // ── CSV / Excel path (Mercado Libre) ──────
     try {
       const { headers, data, fileName } = await parseFile(file);
       const colMap = autoDetect(headers);
@@ -2309,7 +2436,7 @@ function startDispatch() {
   if (!parsedFile) return;
 
   let packages;
-  if (parsedFile.type === 'zpl') {
+  if (parsedFile.type === 'zpl' || parsedFile.type === 'tiendanube') {
     packages = parsedFile.packages;
   } else {
     const cm = parsedFile.colMap;
@@ -2395,7 +2522,7 @@ function setDespachoUI(phase) {
   var bFin = document.getElementById('btnFinalizar');
   if (!bIni || !bFin) return;
   const ic = (name) => `<i data-lucide="${name}" class="icon"></i>`;
-  const tipoLbl = resolveDispatchType() === 'flex' ? 'Flex' : 'Colecta';
+  const tipoLbl = (function(){ var t = resolveDispatchType(); return t === 'flex' ? 'Flex' : (t === 'tiendanube' ? 'Tienda Nube' : 'Colecta'); })();
   if (phase === 'idle') {
     bIni.disabled = false; bIni.classList.remove('opacity-40','cursor-not-allowed');
     bFin.disabled = true;  bFin.classList.add('opacity-40','cursor-not-allowed');
@@ -2426,7 +2553,7 @@ function iniciarDespacho() {
   currentDespacho = [];
   despachoActive  = true;
   setDespachoUI('active');
-  const tipoLabel = tipo === 'flex' ? 'Flex (QR)' : 'Colecta (Código de barras)';
+  const tipoLabel = tipo === 'flex' ? 'Flex (QR)' : (tipo === 'tiendanube' ? 'Tienda Nube' : 'Colecta (Código de barras)');
   toast(`🚀 ${tipoLabel} iniciado — escaneá los paquetes`, 'ok', 3000);
   startScanner(true); // única puerta de encendido de la cámara
 }
@@ -2440,7 +2567,7 @@ function iniciarDespachoTipo(tipo) {
   currentDespacho = [];
   despachoActive  = true;
   setDespachoUI('active');
-  const tipoLabel = tipo === 'flex' ? 'Flex (QR)' : 'Colecta (Código de barras)';
+  const tipoLabel = tipo === 'flex' ? 'Flex (QR)' : (tipo === 'tiendanube' ? 'Tienda Nube' : 'Colecta (Código de barras)');
   toast(`🚀 ${tipoLabel} iniciado — escaneá los paquetes`, 'ok', 3000);
   startScanner(true); // única puerta de encendido de la cámara
 }
@@ -2907,6 +3034,15 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('drive-search')?.addEventListener('input', function(e) { driveSearchQuery = e.target.value; filterDriveFiles(); });
   document.getElementById('btn-drive-colecta')?.addEventListener('click', () => setDriveTipo('colecta'));
   document.getElementById('btn-drive-flex')?.addEventListener('click', () => setDriveTipo('flex'));
+  document.getElementById('btn-drive-tiendanube')?.addEventListener('click', () => setDriveTipo('tiendanube'));
+  document.getElementById('scanner-list-area')?.addEventListener('click', function(e) {
+    if (!state || state.dispatchType !== 'tiendanube') return;
+    const card = e.target.closest('.tn-card');
+    if (!card) return;
+    if (!despachoActive) { toast('Tocá "Iniciar Despacho" primero', 'warn', 2500); return; }
+    const order = card.getAttribute('data-order');
+    if (order) processScan(order);
+  });
   loadDriveFiles();
   document.getElementById('btn-refresh-drive-files').addEventListener('click', loadDriveFiles);
 

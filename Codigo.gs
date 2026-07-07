@@ -13,6 +13,7 @@ var MAX_HISTORY = 50;
 var FOLDER_NAME = 'PARKA Despacho';
 var TIPO_FLEX = 'flex';
 var TIPO_COLECTA = 'colecta';
+var TIPO_TIENDANUBE = 'tiendanube';
 
 // GET
 function doGet(e) {
@@ -103,7 +104,7 @@ function procesarYGuardarExcel(body, tipo) {
   var fecha = body.fecha || Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd');
 
   // Incluir el tipo en el nombre del archivo
-  var tipoCapital = tipo === TIPO_FLEX ? 'Flex' : 'Colecta';
+  var tipoCapital = tipo === TIPO_FLEX ? 'Flex' : (tipo === TIPO_TIENDANUBE ? 'TiendaNube' : 'Colecta');
   var nombre = 'Despacho_' + tipoCapital + '_' + fecha;
 
   // 1. Crear Google Sheet temporal
@@ -173,7 +174,14 @@ function getColectaFolder() {
   return it.hasNext() ? it.next() : root.createFolder(TIPO_COLECTA);
 }
 
+function getTiendaNubeFolder() {
+  var root = getRootFolder();
+  var it = root.getFoldersByName('TiendaNube');
+  return it.hasNext() ? it.next() : root.createFolder('TiendaNube');
+}
+
 function getTipoBaseFolder(tipo) {
+  if (tipo === TIPO_TIENDANUBE) return getTiendaNubeFolder();
   return tipo === TIPO_FLEX ? getFlexFolder() : getColectaFolder();
 }
 
