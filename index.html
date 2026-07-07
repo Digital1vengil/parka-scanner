@@ -826,6 +826,16 @@ async function loadDriveFiles() {
     return;
   }
 
+  // En modo Tienda Nube solo se leen CSV/Excel (no los .txt de Mercado Libre)
+  if (driveTipo === 'tiendanube') {
+    const okExt = ['csv', 'xlsx', 'xls'];
+    groups = groups.map(function(g) {
+      return Object.assign({}, g, { files: (g.files || []).filter(function(f) {
+        return okExt.indexOf((f.name.split('.').pop() || '').toLowerCase()) !== -1;
+      }) });
+    });
+  }
+
   const today    = new Date().toISOString().slice(0, 10);
   const hasFiles = groups.some(g => g.files && g.files.length > 0);
 
