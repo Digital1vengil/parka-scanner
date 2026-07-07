@@ -508,11 +508,8 @@
     <button id="btn-fab-toggle" class="flex-shrink-0 bg-white active:bg-slate-100 border border-slate-200 text-slate-600 w-12 h-12 rounded-full shadow-sm flex items-center justify-center" aria-label="Más acciones">
       <i data-lucide="plus" class="icon" style="width:22px;height:22px;"></i>
     </button>
-    <button id="btnIniciarColecta" style="background-color:#2563eb" class="flex-1 active:opacity-80 text-white font-bold py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-1.5 text-xs">
-      <i data-lucide="barcode" class="icon"></i> Iniciar Colecta
-    </button>
-    <button id="btnIniciarFlex" style="background-color:#7c3aed" class="flex-1 active:opacity-80 text-white font-bold py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-1.5 text-xs">
-      <i data-lucide="qr-code" class="icon"></i> Iniciar Flex
+    <button id="btnIniciar" class="flex-1 bg-forest-600 active:bg-forest-700 text-white font-bold py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-2 text-sm">
+      <i data-lucide="rocket" class="icon"></i> Iniciar Despacho
     </button>
     <button id="btnFinalizar" disabled class="flex-1 bg-amber-500 active:bg-amber-600 text-black font-bold py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-2 text-sm opacity-40 cursor-not-allowed">
       <i data-lucide="check-circle" class="icon"></i> Finalizar Despacho
@@ -804,6 +801,7 @@ function setDriveTipo(tipo) {
   dispatchType = tipo;
   persistDispatchType(tipo);
   updateDriveTipoUI();
+  if (typeof despachoActive === 'undefined' || !despachoActive) setDespachoUI('idle');
   loadDriveFiles();
 }
 
@@ -2393,36 +2391,26 @@ async function beginDay() {
 
 // INICIAR / FINALIZAR DESPACHO
 function setDespachoUI(phase) {
-  var bCol = document.getElementById('btnIniciarColecta');
-  var bFlx = document.getElementById('btnIniciarFlex');
+  var bIni = document.getElementById('btnIniciar');
   var bFin = document.getElementById('btnFinalizar');
-  if (!bFin) return;
+  if (!bIni || !bFin) return;
   const ic = (name) => `<i data-lucide="${name}" class="icon"></i>`;
-  const setIni = (disabled) => {
-    [bCol, bFlx].forEach(function(b) {
-      if (!b) return;
-      b.disabled = disabled;
-      b.classList.toggle('opacity-40', disabled);
-      b.classList.toggle('cursor-not-allowed', disabled);
-    });
-  };
+  const tipoLbl = resolveDispatchType() === 'flex' ? 'Flex' : 'Colecta';
   if (phase === 'idle') {
-    setIni(false);
-    if (bCol) bCol.innerHTML = ic('barcode') + ' Iniciar Colecta';
-    if (bFlx) bFlx.innerHTML = ic('qr-code') + ' Iniciar Flex';
+    bIni.disabled = false; bIni.classList.remove('opacity-40','cursor-not-allowed');
     bFin.disabled = true;  bFin.classList.add('opacity-40','cursor-not-allowed');
+    bIni.innerHTML = ic('rocket') + ' Iniciar Despacho · ' + tipoLbl;
     bFin.innerHTML = ic('check-circle') + ' Finalizar Despacho';
   } else if (phase === 'active') {
-    setIni(true);
-    if (dispatchType === 'colecta' && bCol) bCol.innerHTML = ic('circle-dot') + ' Colecta activo';
-    if (dispatchType === 'flex'    && bFlx) bFlx.innerHTML = ic('circle-dot') + ' Flex activo';
+    bIni.disabled = true;  bIni.classList.add('opacity-40','cursor-not-allowed');
     bFin.disabled = false; bFin.classList.remove('opacity-40','cursor-not-allowed');
+    bIni.innerHTML = ic('circle-dot') + ' ' + tipoLbl + ' activo';
   } else if (phase === 'saving') {
-    setIni(true); bFin.disabled = true;
+    bIni.disabled = true; bFin.disabled = true;
     bFin.innerHTML = ic('loader-circle') + ' Guardando…';
   } else if (phase === 'retry') {
     // Falló el guardado en Drive. Los items quedan en currentDespacho para reintentar.
-    setIni(true);
+    bIni.disabled = true;  bIni.classList.add('opacity-40','cursor-not-allowed');
     bFin.disabled = false; bFin.classList.remove('opacity-40','cursor-not-allowed');
     bFin.innerHTML = ic('refresh-cw') + ' Reintentar guardar en Drive';
   }
@@ -2430,14 +2418,15 @@ function setDespachoUI(phase) {
 }
 
 function iniciarDespacho() {
-  if (!dispatchType) {
-    toast('Selecciona un tipo de despacho primero (Flex o Colecta)', 'warn', 3000);
-    return;
-  }
+  // Usa el tipo elegido al inicio (selector Colecta/Flex). Una sola selección.
+  const tipo = resolveDispatchType();
+  dispatchType = tipo;
+  persistDispatchType(tipo);
+  if (state) { state.dispatchType = tipo; saveState(); }
   currentDespacho = [];
   despachoActive  = true;
   setDespachoUI('active');
-  const tipoLabel = dispatchType === 'flex' ? 'Flex (QR)' : 'Colecta (Código de barras)';
+  const tipoLabel = tipo === 'flex' ? 'Flex (QR)' : 'Colecta (Código de barras)';
   toast(`🚀 ${tipoLabel} iniciado — escaneá los paquetes`, 'ok', 3000);
   startScanner(true); // única puerta de encendido de la cámara
 }
@@ -3007,8 +2996,10 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btn-begin-day')?.addEventListener('click', beginDay);
-  document.getElementById('btnIniciarColecta')?.addEventListener('click', () => { setScanMode('barcode'); iniciarDespachoTipo('colecta'); });
-  document.getElementById('btnIniciarFlex')?.addEventListener('click', () => { setScanMode('qr'); iniciarDespachoTipo('flex'); });
+  document.getElementById('btnIniciar')?.addEventListener('click', () => {
+    setScanMode(resolveDispatchType() === 'flex' ? 'qr' : 'barcode');
+    iniciarDespacho();
+  });
   document.getElementById('btnFinalizar')?.addEventListener('click', finalizarDespacho);
 
   // Botones del modal de selección de tipo (Flex/Colecta)
