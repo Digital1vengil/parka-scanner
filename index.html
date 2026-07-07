@@ -1621,10 +1621,19 @@ function parseDelimited(text, delim) {
   return rows;
 }
 
+function isTiendaNubeHeaders(headerArr) {
+  const j = (headerArr || []).map(function(c) { return String(c).trim().toLowerCase(); }).join('|');
+  return /mero de orden/.test(j) && /tracking/.test(j);
+}
+
 function parseTiendaNubeCSV(text) {
   const rows = parseDelimited(text, ';');
   if (rows.length < 2) return [];
-  const h = rows[0].map(function(s) { return s.trim(); });
+  return buildTiendaNubeFromRows(rows[0], rows.slice(1));
+}
+
+function buildTiendaNubeFromRows(headerArr, dataRows) {
+  const h = (headerArr || []).map(function(s) { return String(s).trim(); });
   const idx = function(name) { return h.findIndex(function(c) { return c.trim().toLowerCase() === name.toLowerCase(); }); };
   const iO = idx('Número de orden');
   const iCE = idx('Nombre para el envío');
@@ -1636,8 +1645,8 @@ function parseTiendaNubeCSV(text) {
   const iMedio = idx('Medio de envío');
   const iDir = idx('Dirección'); const iNum = idx('Número'); const iLoc = idx('Localidad'); const iCiu = idx('Ciudad'); const iCP = idx('Código postal');
   const map = new Map();
-  for (let r = 1; r < rows.length; r++) {
-    const row = rows[r]; if (!row || row.length < 2) continue;
+  for (let r = 0; r < dataRows.length; r++) {
+    const row = dataRows[r]; if (!row || row.length < 2) continue;
     const orden = iO >= 0 ? (row[iO] || '').trim() : ''; if (!orden) continue;
     if (!map.has(orden)) map.set(orden, { orden: orden, comprador: '', productos: [], skus: [], cantidad: 0, tnTracking: '', medioEnvio: '', direccion: '' });
     const g = map.get(orden);
@@ -2303,6 +2312,17 @@ async function handleFile(file) {
     // ── CSV / Excel path (Mercado Libre) ──────
     try {
       const { headers, data, fileName } = await parseFile(file);
+      // ¿Es un export de Tienda Nube? (CSV o XLSX) — se detecta por encabezados
+      if (isTiendaNubeHeaders(headers)) {
+        const pkgs = buildTiendaNubeFromRows(headers, data);
+        if (pkgs.length) {
+          dispatchType = 'tiendanube'; persistDispatchType('tiendanube'); driveTipo = 'tiendanube'; updateDriveTipoUI();
+          parsedFile = { type: 'tiendanube', packages: pkgs, fileName: fileName };
+          toast('✅ ' + pkgs.length + ' órdenes de Tienda Nube — iniciando…', 'ok', 2500);
+          startDispatch();
+          return;
+        }
+      }
       const colMap = autoDetect(headers);
 
       parsedFile = { type: 'csv', headers, data, colMap, fileName };

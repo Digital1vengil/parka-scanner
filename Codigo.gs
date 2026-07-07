@@ -236,6 +236,7 @@ function getFilesInFolder(folder) {
 }
 
 function listDriveFiles(tipo) {
+  if (tipo === TIPO_TIENDANUBE) return listTiendaNubeFiles();
   var tipoBase = getTipoBaseFolder(tipo);
   getTodayFolder(tipo);
 
@@ -264,6 +265,42 @@ function listDriveFiles(tipo) {
     rootFolderUrl: 'https://drive.google.com/drive/folders/' + tipoBase.getId(),
     groups: groups,
     tipo: tipo
+  };
+}
+
+// Tienda Nube: escanea TODO el arbol de PARKA Despacho buscando csv/xls/xlsx
+function getTNFiles(folder) {
+  var files = [];
+  var it = folder.getFiles();
+  while (it.hasNext()) {
+    var f = it.next();
+    var name = f.getName();
+    var ext = name.split('.').pop().toLowerCase();
+    if (['csv','xls','xlsx'].indexOf(ext) !== -1) {
+      files.push({ id: f.getId(), name: name, size: f.getSize(), modifiedAt: f.getLastUpdated().toISOString() });
+    }
+  }
+  return files.sort(function(a, b) { return b.modifiedAt.localeCompare(a.modifiedAt); });
+}
+
+function collectTNGroups(folder, groups, depth) {
+  if (depth > 4) return;
+  var files = getTNFiles(folder);
+  if (files.length > 0) groups.push({ date: folder.getName(), folderId: folder.getId(), files: files });
+  var it = folder.getFolders();
+  while (it.hasNext()) { collectTNGroups(it.next(), groups, depth + 1); }
+}
+
+function listTiendaNubeFiles() {
+  var root = getRootFolder();
+  getTodayFolder(TIPO_TIENDANUBE); // asegura que exista PARKA Despacho/TiendaNube/HOY
+  var groups = [];
+  collectTNGroups(root, groups, 0);
+  groups.sort(function(a, b) { return b.date.localeCompare(a.date); });
+  return {
+    rootFolderUrl: 'https://drive.google.com/drive/folders/' + getTiendaNubeFolder().getId(),
+    groups: groups,
+    tipo: TIPO_TIENDANUBE
   };
 }
 
