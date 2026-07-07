@@ -678,9 +678,13 @@ async function gdriveGet(action, params) {
     let qs = '?action=' + encodeURIComponent(action);
     if (params) {
       for (const [k, v] of Object.entries(params)) {
+        if (k === '_ts') continue; // el anti-caché se agrega siempre abajo
         qs += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(v);
       }
     }
+    // Anti-caché en TODAS las consultas (Apps Script cachea las respuestas GET por URL):
+    // así 'getFile' trae siempre el contenido actualizado y 'listFiles' la lista fresca.
+    qs += '&_ts=' + Date.now();
     const r = await fetch(url + qs, { cache: 'no-store' });
     if (!r.ok) return null;
     const data = await r.json();
