@@ -849,8 +849,8 @@ async function loadDriveFiles() {
       <div class="bg-slate-50 rounded-xl p-4 text-center">
         <p class="text-slate-500 text-sm mb-1">Sin archivos todavía</p>
         <p class="text-slate-400 text-xs">
-          Subí tus archivos ZPL / CSV a la carpeta de hoy en Drive:<br>
-          <span class="text-forest-600 font-semibold">📁 PARKA Despacho / ${driveTipo === 'flex' ? 'Flex' : 'Colecta'} / ${today}</span>
+          ${driveTipo === 'tiendanube' ? 'Subí tu CSV de ventas de Tienda Nube a la carpeta de hoy:' : 'Subí tus archivos ZPL / CSV a la carpeta de hoy en Drive:'}<br>
+          <span class="text-forest-600 font-semibold">📁 PARKA Despacho / ${driveTipo === 'flex' ? 'Flex' : (driveTipo === 'tiendanube' ? 'TiendaNube' : 'Colecta')} / ${today}</span>
         </p>
       </div>`;
     return;
