@@ -236,25 +236,22 @@ function getFilesInFolder(folder) {
 }
 
 function listDriveFiles(tipo) {
-  if (tipo === TIPO_TIENDANUBE) return listTiendaNubeFiles();
   var tipoBase = getTipoBaseFolder(tipo);
   getTodayFolder(tipo);
 
-  var folders = [];
+  // Solo la carpeta del tipo elegido; omite carpetas vacías y unifica duplicados por fecha.
+  var byName = {};
+  var order = [];
   var fit = tipoBase.getFolders();
   while (fit.hasNext()) {
     var f = fit.next();
-    folders.push({ name: f.getName(), folder: f });
+    var name = f.getName();
+    var files = getFilesInFolder(f);
+    if (files.length === 0) continue;
+    if (!byName[name]) { byName[name] = { date: name, folderId: f.getId(), files: files }; order.push(name); }
+    else { byName[name].files = byName[name].files.concat(files); }
   }
-  folders.sort(function(a, b) { return b.name.localeCompare(a.name); });
-
-  var groups = folders.map(function(item) {
-    return {
-      date: item.name,
-      folderId: item.folder.getId(),
-      files: getFilesInFolder(item.folder)
-    };
-  });
+  var groups = order.sort(function(a, b) { return b.localeCompare(a); }).map(function(n) { return byName[n]; });
 
   var rootFiles = getFilesInFolder(tipoBase);
   if (rootFiles.length > 0) {
