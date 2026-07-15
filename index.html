@@ -894,13 +894,11 @@ async function loadDriveFiles() {
          </button>`
       : '';
 
-    const loadSelectedBtn = group.files.length > 1
-      ? `<button class="drive-load-selected-btn hidden w-full bg-forest-600 active:bg-forest-700 text-white font-bold
+    const loadSelectedBtn = `<button class="drive-load-selected-btn hidden w-full bg-forest-600 active:bg-forest-700 text-white font-bold
                         rounded-2xl px-4 py-3 text-sm flex items-center justify-center gap-2 mb-2"
                 data-gi="${gi}">
            ➕ Cargar seleccionados (<span class="sel-count">0</span>)
-         </button>`
-      : '';
+         </button>`;
 
     const filesHTML = group.files.map((f, fi) => {
       const ext  = f.name.split('.').pop().toLowerCase();
@@ -921,7 +919,7 @@ async function loadDriveFiles() {
               <p class="text-slate-500 text-xs mt-0.5">${fmtSize(f.size)} · ${time}</p>
             </div>
           </button>
-          <span class="drive-lbl text-forest-600 text-sm font-bold flex-shrink-0">Cargar →</span>
+          <button class="drive-file-load drive-lbl text-forest-600 text-sm font-bold flex-shrink-0 active:opacity-60" data-file-id="${f.id}" data-file-name="${f.name}">Cargar →</button>
         </div>`;
     }).join('');
 
@@ -946,6 +944,10 @@ async function loadDriveFiles() {
   });
 
   list.querySelectorAll('.drive-file-btn').forEach(btn => {
+    btn.addEventListener('click', () =>
+      loadFileFromDrive(btn.dataset.fileId, btn.dataset.fileName, btn));
+  });
+  list.querySelectorAll('.drive-file-load').forEach(btn => {
     btn.addEventListener('click', () =>
       loadFileFromDrive(btn.dataset.fileId, btn.dataset.fileName, btn));
   });
