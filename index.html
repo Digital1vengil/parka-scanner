@@ -3259,5 +3259,230 @@ document.addEventListener('DOMContentLoaded', () => {
 
 });
 </script>
+
+<!-- PARKA - cierre del dia, Tienda Nube con tilde manual y envios manuales -->
+<script>
+(function () {
+  'use strict';
+
+  // 1. Tienda Nube: nunca abrir la camara
+  var _startScanner = window.startScanner;
+  window.startScanner = function () {
+    try {
+      var t = (typeof resolveDispatchType === 'function') ? resolveDispatchType() : '';
+      if (t === 'tiendanube') return Promise.resolve();
+    } catch (e) {}
+    return _startScanner.apply(this, arguments);
+  };
+
+  var MANUALES_KEY = 'parka_envios_manuales';
+
+  function hoyStr() { return new Date().toISOString().slice(0, 10); }
+
+  function leerManuales() {
+    try {
+      var raw = localStorage.getItem(MANUALES_KEY);
+      var all = raw ? JSON.parse(raw) : [];
+      return all.filter(function (m) { return m.fecha === hoyStr(); });
+    } catch (e) { return []; }
+  }
+
+  function guardarManuales(list) {
+    try { localStorage.setItem(MANUALES_KEY, JSON.stringify(list)); } catch (e) {}
+  }
+
+  // 2. Enviar cierre del dia
+  async function enviarCierreDelDia() {
+    var url = (typeof getGDriveUrl === 'function') ? getGDriveUrl() : '';
+    if (!url) { toast('Conecta primero el Apps Script', 'warn', 3500); return; }
+    var btn = document.getElementById('btn-cierre-dia');
+    var prev = btn ? btn.innerHTML : '';
+    if (btn) { btn.disabled = true; btn.innerHTML = 'Enviando cierre...'; }
+    try {
+      var r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'cerrarDia' }),
+        redirect: 'follow'
+      });
+      var data = await r.json();
+      if (data && data.ok && data.count === 0) {
+        toast('No hay despachos registrados hoy', 'info', 4000);
+      } else if (data && data.ok) {
+        toast('Cierre enviado a ' + (data.mail || 'gerencia') + ' - ' +
+              data.despachados + ' despachados / ' + data.noDespachados + ' no despachados', 'ok', 6000);
+      } else {
+        toast('No se pudo enviar el cierre', 'error', 4000);
+      }
+    } catch (e) {
+      toast('Error al enviar el cierre', 'error', 4000);
+    }
+    if (btn) { btn.disabled = false; btn.innerHTML = prev; }
+  }
+
+  // 3. Envio manual al backend
+  async function postEnvioManual(envio) {
+    var url = (typeof getGDriveUrl === 'function') ? getGDriveUrl() : '';
+    if (!url) return false;
+    try {
+      var r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'envioManual', data: envio }),
+        redirect: 'follow'
+      });
+      var data = await r.json();
+      return !!(data && data.ok);
+    } catch (e) { return false; }
+  }
+
+  function renderManuales() {
+    var cont = document.getElementById('manuales-list');
+    if (!cont) return;
+    var list = leerManuales();
+    if (!list.length) {
+      cont.innerHTML = '<p class="text-slate-400 text-xs py-3 text-center">Todavia no cargaste envios manuales hoy</p>';
+      return;
+    }
+    cont.innerHTML = list.map(function (m) {
+      var badge = m.plataforma === 'ML'
+        ? '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700">ML</span>'
+        : '<span class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-sky-100 text-sky-700">TN</span>';
+      return '<div class="flex items-center gap-2 py-2 border-b border-slate-100 last:border-0">' +
+               badge +
+               '<div class="flex-1 min-w-0">' +
+                 '<p class="text-slate-800 text-sm font-semibold truncate">' + (m.nombre || '(sin nombre)') + '</p>' +
+                 '<p class="text-slate-500 text-xs truncate">' + (m.articulo || '') + '</p>' +
+               '</div>' +
+               '<span class="text-slate-400 text-[11px] flex-shrink-0">' + (m.hora || '') + '</span>' +
+             '</div>';
+    }).join('');
+  }
+
+  function bloqueManuales() {
+    return '' +
+    '<div id="manuales-zone" class="bg-white rounded-2xl border border-slate-200 shadow-sm p-4">' +
+      '<p class="text-slate-700 text-sm font-semibold flex items-center gap-2 mb-3">' +
+        '<i data-lucide="package-plus" class="icon text-forest-600"></i> Envios manuales' +
+      '</p>' +
+      '<input id="manual-nombre" type="text" placeholder="Nombre de la persona" ' +
+        'class="w-full mb-2 px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-forest-600" />' +
+      '<input id="manual-articulo" type="text" placeholder="Articulo a enviar" ' +
+        'class="w-full mb-2 px-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:outline-none focus:border-forest-600" />' +
+      '<div class="flex gap-2 mb-3">' +
+        '<button id="manual-plat-ml" class="flex-1 text-xs font-bold py-2 rounded-xl border border-slate-200 text-slate-500">Mercado Libre</button>' +
+        '<button id="manual-plat-tn" class="flex-1 text-xs font-bold py-2 rounded-xl border border-slate-200 text-slate-500">Tienda Nube</button>' +
+      '</div>' +
+      '<button id="manual-add" class="w-full bg-forest-600 active:bg-forest-700 text-white font-semibold text-sm py-2.5 rounded-xl flex items-center justify-center gap-2">' +
+        '<i data-lucide="plus" class="icon" style="width:16px;height:16px;"></i> Agregar envio' +
+      '</button>' +
+      '<div id="manuales-list" class="mt-3"></div>' +
+    '</div>';
+  }
+
+  var platSel = 'ML';
+
+  function pintarPlat() {
+    var ml = document.getElementById('manual-plat-ml');
+    var tn = document.getElementById('manual-plat-tn');
+    if (!ml || !tn) return;
+    var on  = 'flex-1 text-xs font-bold py-2 rounded-xl border border-forest-600 bg-forest-600 text-white';
+    var off = 'flex-1 text-xs font-bold py-2 rounded-xl border border-slate-200 text-slate-500';
+    ml.className = platSel === 'ML' ? on : off;
+    tn.className = platSel === 'TN' ? on : off;
+  }
+
+  async function agregarManual() {
+    var iNom = document.getElementById('manual-nombre');
+    var iArt = document.getElementById('manual-articulo');
+    var nombre = (iNom.value || '').trim();
+    var articulo = (iArt.value || '').trim();
+    if (!nombre || !articulo) { toast('Completa nombre y articulo', 'warn', 3000); return; }
+
+    var btn = document.getElementById('manual-add');
+    if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+
+    var envio = {
+      nombre: nombre,
+      articulo: articulo,
+      plataforma: platSel,
+      fecha: hoyStr(),
+      hora: new Date().toTimeString().slice(0, 5)
+    };
+
+    var ok = await postEnvioManual(envio);
+
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+
+    if (!ok) { toast('No se pudo guardar en Drive. Revisa la conexion.', 'error', 4000); return; }
+
+    var all = [];
+    try { all = JSON.parse(localStorage.getItem(MANUALES_KEY) || '[]'); } catch (e) { all = []; }
+    all.push(envio);
+    guardarManuales(all);
+    iNom.value = '';
+    iArt.value = '';
+    renderManuales();
+    toast('Envio manual guardado (' + platSel + ')', 'ok', 3000);
+  }
+
+  // 4. Montaje
+  function montar() {
+    var btnStart = document.getElementById('btn-start');
+    if (btnStart && !document.getElementById('btn-cierre-dia')) {
+      var b = document.createElement('button');
+      b.id = 'btn-cierre-dia';
+      b.className = 'w-full mt-2 bg-slate-800 active:bg-slate-900 text-white font-bold text-base py-3.5 rounded-2xl shadow-lg flex items-center justify-center gap-2';
+      b.innerHTML = '<i data-lucide="send" class="icon"></i> Enviar cierre del dia';
+      btnStart.insertAdjacentElement('afterend', b);
+      b.addEventListener('click', enviarCierreDelDia);
+    }
+
+    var ancla = document.getElementById('despacho-history-zone');
+    if (ancla && !document.getElementById('manuales-zone')) {
+      ancla.insertAdjacentHTML('afterend', bloqueManuales());
+      document.getElementById('manual-plat-ml').addEventListener('click', function () { platSel = 'ML'; pintarPlat(); });
+      document.getElementById('manual-plat-tn').addEventListener('click', function () { platSel = 'TN'; pintarPlat(); });
+      document.getElementById('manual-add').addEventListener('click', agregarManual);
+      pintarPlat();
+      renderManuales();
+    }
+
+    var area = document.getElementById('scanner-list-area');
+    if (area && !area.dataset.pkUntoggle) {
+      area.dataset.pkUntoggle = '1';
+      area.addEventListener('click', function (e) {
+        if (!state || state.dispatchType !== 'tiendanube') return;
+        var card = e.target.closest ? e.target.closest('.tn-card') : null;
+        if (!card) return;
+        var order = card.getAttribute('data-order');
+        if (!order) return;
+        var pkg = (typeof findTnPackage === 'function') ? findTnPackage(order) : null;
+        if (!pkg || pkg.estado !== 'despachado') return;
+        e.stopPropagation();
+        pkg.estado = 'pendiente';
+        delete pkg.scannedAt;
+        delete pkg.scannedCode;
+        for (var i = currentDespacho.length - 1; i >= 0; i--) {
+          if (String(currentDespacho[i]['Numero de Etiqueta']) === String(order)) currentDespacho.splice(i, 1);
+        }
+        state._completionNotified = false;
+        saveState();
+        if (typeof refreshUI === 'function') refreshUI();
+        toast('Desmarcado #' + order, 'info', 2000);
+      }, true);
+    }
+
+    if (window.lucide && lucide.createIcons) { try { lucide.createIcons(); } catch (e) {} }
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { setTimeout(montar, 0); });
+  } else {
+    setTimeout(montar, 0);
+  }
+})();
+</script>
+
 </body>
 </html>
