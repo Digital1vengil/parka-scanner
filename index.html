@@ -3485,18 +3485,17 @@ document.addEventListener('DOMContentLoaded', () => {
 </script>
 
 
-<!-- SmartPost: envios manuales + cierre del dia + correos -->
+<!-- SmartPost: envios manuales + cierre del dia + correos (pantalla de inicio) -->
 <script>
 (function () {
   'use strict';
 
   var KEY = 'parka_envios_manuales';
   var plat = 'ML';
-  var cfgCache = null;
 
   function hoy() { return new Date().toISOString().slice(0, 10); }
   function url() { return (typeof getGDriveUrl === 'function') ? getGDriveUrl() : ''; }
-  function aviso(msg, tipo, ms) { try { toast(msg, tipo || 'info', ms || 3000); } catch (e) { alert(msg); } }
+  function aviso(m, t, ms) { try { toast(m, t || 'info', ms || 3000); } catch (e) { alert(m); } }
 
   async function post(action, data) {
     var u = url();
@@ -3519,47 +3518,42 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (e) { return []; }
   }
 
-  function guardarLocal(env) {
-    var all = [];
-    try { all = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) {}
-    all.push(env);
-    try { localStorage.setItem(KEY, JSON.stringify(all)); } catch (e) {}
-  }
-
   function pintarLista() {
     var c = document.getElementById('sp-lista');
     if (!c) return;
     var l = locales();
-    if (!l.length) { c.innerHTML = '<p style="color:#94a3b8;font-size:13px;text-align:center;padding:14px 0;">Todavia no cargaste envios hoy</p>'; return; }
+    if (!l.length) { c.innerHTML = '<p style="color:#94a3b8;font-size:12px;text-align:center;padding:12px 0;">Todavia no cargaste envios hoy</p>'; return; }
     c.innerHTML = l.map(function (m) {
       var col = m.plataforma === 'ML' ? '#b45309' : '#0369a1';
       var bg  = m.plataforma === 'ML' ? '#fef3c7' : '#e0f2fe';
-      return '<div style="display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid #f1f5f9;">' +
-        '<span style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:999px;background:' + bg + ';color:' + col + ';">' + m.plataforma + '</span>' +
-        '<div style="flex:1;min-width:0;"><p style="margin:0;font-size:14px;font-weight:600;color:#1e293b;">' + (m.nombre || '') + '</p>' +
-        '<p style="margin:0;font-size:12px;color:#64748b;">' + (m.articulo || '') + '</p></div>' +
+      var ref = m.numero ? ((m.plataforma === 'ML' ? 'Venta ' : 'Orden ') + m.numero) : '';
+      return '<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f1f5f9;">' +
+        '<span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:999px;background:' + bg + ';color:' + col + ';">' + m.plataforma + '</span>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<p style="margin:0;font-size:13px;font-weight:600;color:#1e293b;">' + (m.nombre || '') + '</p>' +
+          '<p style="margin:0;font-size:11px;color:#64748b;">' + (m.articulo || '') + (ref ? ' &middot; ' + ref : '') + '</p>' +
+        '</div>' +
         '<span style="font-size:11px;color:#94a3b8;">' + (m.hora || '') + '</span></div>';
     }).join('');
   }
 
   function pintarPlat() {
-    var a = document.getElementById('sp-ml'), b = document.getElementById('sp-tn');
+    var a = document.getElementById('sp-ml'), b = document.getElementById('sp-tn'), n = document.getElementById('sp-numero');
     if (!a || !b) return;
-    var on = 'flex:1;padding:10px;border-radius:12px;border:2px solid #2f5d3a;background:#2f5d3a;color:#fff;font-weight:700;font-size:13px;';
+    var on  = 'flex:1;padding:10px;border-radius:12px;border:2px solid #2f5d3a;background:#2f5d3a;color:#fff;font-weight:700;font-size:13px;';
     var off = 'flex:1;padding:10px;border-radius:12px;border:1px solid #e2e8f0;background:#fff;color:#64748b;font-weight:700;font-size:13px;';
     a.style.cssText = plat === 'ML' ? on : off;
     b.style.cssText = plat === 'TN' ? on : off;
+    if (n) n.placeholder = plat === 'ML' ? 'Numero de venta (Mercado Libre)' : 'Numero de orden (Tienda Nube)';
   }
 
   async function cargarConfig() {
     var d = await post('getConfig', null);
-    if (d && (d.mail || d.hora)) {
-      cfgCache = d;
-      var m = document.getElementById('sp-mail'), c = document.getElementById('sp-copia'), h = document.getElementById('sp-hora');
-      if (m && !m.value) m.value = d.mail || '';
-      if (c && !c.value) c.value = d.copia || '';
-      if (h && !h.value) h.value = (d.hora === 0 || d.hora) ? d.hora : 17;
-    }
+    if (!d) return;
+    var m = document.getElementById('sp-mail'), c = document.getElementById('sp-copia'), h = document.getElementById('sp-hora');
+    if (m && !m.value) m.value = d.mail || '';
+    if (c && !c.value) c.value = d.copia || '';
+    if (h && !h.value) h.value = (d.hora === 0 || d.hora) ? d.hora : 17;
   }
 
   async function guardarCorreos() {
@@ -3572,30 +3566,35 @@ document.addEventListener('DOMContentLoaded', () => {
     b.disabled = true; b.style.opacity = '0.6';
     var d = await post('setConfig', { mail: m, copia: c, hora: h });
     b.disabled = false; b.style.opacity = '1';
-    if (d && d.ok) { cfgCache = d; aviso('Correos guardados. Cierre automatico ' + d.hora + ' hs', 'ok', 4000); }
+    if (d && d.ok) aviso('Guardado. Cierre automatico ' + d.hora + ' hs', 'ok', 4000);
     else aviso((d && d.error) ? d.error : 'No se pudo guardar', 'error', 4000);
   }
 
   async function agregar() {
     var n = document.getElementById('sp-nombre').value.trim();
     var a = document.getElementById('sp-articulo').value.trim();
+    var num = document.getElementById('sp-numero').value.trim();
     if (!n || !a) { aviso('Completa nombre y articulo', 'warn'); return; }
+    if (!num) { aviso(plat === 'ML' ? 'Falta el numero de venta' : 'Falta el numero de orden', 'warn'); return; }
     var b = document.getElementById('sp-agregar');
     b.disabled = true; b.style.opacity = '0.6';
-    var env = { nombre: n, articulo: a, plataforma: plat, fecha: hoy(), hora: new Date().toTimeString().slice(0,5) };
+    var env = { nombre: n, articulo: a, numero: num, plataforma: plat, fecha: hoy(), hora: new Date().toTimeString().slice(0,5) };
     var d = await post('envioManual', env);
     b.disabled = false; b.style.opacity = '1';
     if (!d || !d.ok) { aviso('No se pudo guardar el envio', 'error', 4000); return; }
-    guardarLocal(env);
+    var all = [];
+    try { all = JSON.parse(localStorage.getItem(KEY) || '[]'); } catch (e) {}
+    all.push(env);
+    try { localStorage.setItem(KEY, JSON.stringify(all)); } catch (e) {}
     document.getElementById('sp-nombre').value = '';
     document.getElementById('sp-articulo').value = '';
+    document.getElementById('sp-numero').value = '';
     pintarLista();
     aviso('Envio ' + plat + ' guardado', 'ok');
   }
 
   async function enviarCierre() {
-    var u = url();
-    if (!u) { aviso('Conecta primero el Apps Script', 'warn', 3500); return; }
+    if (!url()) { aviso('Conecta primero el Apps Script', 'warn', 3500); return; }
     var b = document.getElementById('sp-cierre');
     var prev = b.innerHTML;
     b.disabled = true; b.innerHTML = 'Enviando...';
@@ -3606,89 +3605,100 @@ document.addEventListener('DOMContentLoaded', () => {
     else aviso('No se pudo enviar el cierre', 'error', 4000);
   }
 
-  function panelHTML() {
-    var inp = 'width:100%;box-sizing:border-box;margin-bottom:10px;padding:12px;border-radius:12px;border:1px solid #e2e8f0;font-size:14px;';
-    var sec = 'background:#fff;border:1px solid #e2e8f0;border-radius:16px;padding:16px;margin-bottom:14px;';
-    var tit = 'margin:0 0 12px;font-size:13px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:.04em;';
+  function bloqueHTML() {
+    var inp = 'width:100%;box-sizing:border-box;margin-bottom:8px;padding:11px;border-radius:12px;border:1px solid #e2e8f0;font-size:14px;';
+    var lbl = 'display:block;font-size:11px;color:#64748b;margin-bottom:2px;';
     return '' +
-    '<div id="sp-panel" style="display:none;position:fixed;inset:0;z-index:9999;background:#f4f7f0;overflow-y:auto;-webkit-overflow-scrolling:touch;">' +
-      '<div style="position:sticky;top:0;background:#2f5d3a;color:#fff;padding:16px;display:flex;align-items:center;justify-content:space-between;">' +
-        '<span style="font-size:18px;font-weight:800;letter-spacing:-.01em;">SmartPost</span>' +
-        '<button id="sp-cerrar" style="background:rgba(255,255,255,.18);color:#fff;border:0;border-radius:10px;padding:8px 14px;font-weight:700;font-size:14px;">Cerrar</button>' +
+    '<div id="sp-zona" style="background:#fff;border:1px solid #e2e8f0;border-radius:16px;box-shadow:0 1px 2px rgba(0,0,0,.04);padding:16px;margin-bottom:12px;">' +
+      '<p style="margin:0 0 12px;font-size:15px;font-weight:800;color:#2f5d3a;letter-spacing:-.01em;">SmartPost</p>' +
+      '<p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:.04em;">Envio manual</p>' +
+      '<div style="display:flex;gap:8px;margin-bottom:8px;">' +
+        '<button id="sp-ml">Mercado Libre</button><button id="sp-tn">Tienda Nube</button>' +
       '</div>' +
-      '<div style="padding:16px;max-width:640px;margin:0 auto;">' +
-
-        '<div style="' + sec + '">' +
-          '<p style="' + tit + '">Envio manual</p>' +
-          '<input id="sp-nombre" type="text" placeholder="Nombre de la persona" style="' + inp + '" />' +
-          '<input id="sp-articulo" type="text" placeholder="Articulo a enviar" style="' + inp + '" />' +
-          '<div style="display:flex;gap:8px;margin-bottom:12px;">' +
-            '<button id="sp-ml">Mercado Libre</button><button id="sp-tn">Tienda Nube</button>' +
-          '</div>' +
-          '<button id="sp-agregar" style="width:100%;padding:13px;border:0;border-radius:12px;background:#2f5d3a;color:#fff;font-weight:700;font-size:15px;">Agregar envio</button>' +
-          '<div id="sp-lista" style="margin-top:8px;"></div>' +
-        '</div>' +
-
-        '<div style="' + sec + '">' +
-          '<p style="' + tit + '">Cierre del dia</p>' +
-          '<button id="sp-cierre" style="width:100%;padding:15px;border:0;border-radius:12px;background:#1e293b;color:#fff;font-weight:700;font-size:16px;">Enviar cierre del dia</button>' +
-          '<p style="margin:10px 0 0;font-size:12px;color:#64748b;">Si no lo mandas a mano, sale automatico a la hora configurada.</p>' +
-        '</div>' +
-
-        '<div style="' + sec + '">' +
-          '<p style="' + tit + '">Correos del cierre</p>' +
-          '<label style="font-size:12px;color:#64748b;">Correo principal</label>' +
-          '<input id="sp-mail" type="email" placeholder="gerencia@magontex.com.ar" style="' + inp + 'margin-top:4px;" />' +
-          '<label style="font-size:12px;color:#64748b;">Correo adicional (opcional)</label>' +
-          '<input id="sp-copia" type="email" placeholder="otro@magontex.com.ar" style="' + inp + 'margin-top:4px;" />' +
-          '<label style="font-size:12px;color:#64748b;">Hora del cierre automatico (0 a 23)</label>' +
-          '<input id="sp-hora" type="number" min="0" max="23" placeholder="17" style="' + inp + 'margin-top:4px;" />' +
-          '<button id="sp-guardar-mails" style="width:100%;padding:13px;border:0;border-radius:12px;background:#2f5d3a;color:#fff;font-weight:700;font-size:15px;">Guardar</button>' +
-        '</div>' +
-
+      '<input id="sp-nombre" type="text" placeholder="Nombre de la persona" style="' + inp + '" />' +
+      '<input id="sp-articulo" type="text" placeholder="Articulo a enviar" style="' + inp + '" />' +
+      '<input id="sp-numero" type="text" placeholder="Numero de venta (Mercado Libre)" style="' + inp + '" />' +
+      '<button id="sp-agregar" style="width:100%;padding:12px;border:0;border-radius:12px;background:#2f5d3a;color:#fff;font-weight:700;font-size:15px;">Agregar envio</button>' +
+      '<div id="sp-lista" style="margin-top:6px;"></div>' +
+      '<div style="height:1px;background:#f1f5f9;margin:14px 0;"></div>' +
+      '<button id="sp-toggle-cfg" style="width:100%;background:none;border:0;padding:0;text-align:left;font-size:11px;font-weight:700;color:#334155;text-transform:uppercase;letter-spacing:.04em;">Correos del cierre &#9662;</button>' +
+      '<div id="sp-cfg" style="display:none;margin-top:10px;">' +
+        '<label style="' + lbl + '">Correo principal</label>' +
+        '<input id="sp-mail" type="email" placeholder="gerencia@magontex.com.ar" style="' + inp + '" />' +
+        '<label style="' + lbl + '">Correo adicional (opcional)</label>' +
+        '<input id="sp-copia" type="email" placeholder="otro@magontex.com.ar" style="' + inp + '" />' +
+        '<label style="' + lbl + '">Hora del cierre automatico (0 a 23)</label>' +
+        '<input id="sp-hora" type="number" min="0" max="23" placeholder="17" style="' + inp + '" />' +
+        '<button id="sp-guardar-mails" style="width:100%;padding:11px;border:0;border-radius:12px;background:#475569;color:#fff;font-weight:700;font-size:14px;">Guardar correos</button>' +
       '</div>' +
-    '</div>';
-  }
-
-  function abrir() {
-    document.getElementById('sp-panel').style.display = 'block';
-    pintarPlat();
-    pintarLista();
-    cargarConfig();
+    '</div>' +
+    '<button id="sp-cierre" style="width:100%;padding:16px;border:0;border-radius:16px;background:#1e293b;color:#fff;font-weight:800;font-size:16px;box-shadow:0 2px 6px rgba(0,0,0,.12);margin-bottom:12px;">Enviar cierre del dia</button>';
   }
 
   function montar() {
-    var viejo = document.getElementById('manuales-zone');
-    if (viejo) viejo.remove();
-    var viejoBtn = document.getElementById('btn-cierre-dia');
-    if (viejoBtn) viejoBtn.remove();
+    ['manuales-zone', 'btn-cierre-dia', 'sp-fab', 'sp-panel'].forEach(function (id) {
+      var e = document.getElementById(id);
+      if (e) e.remove();
+    });
 
-    if (!document.getElementById('sp-panel')) {
-      document.body.insertAdjacentHTML('beforeend', panelHTML());
-      document.getElementById('sp-cerrar').addEventListener('click', function () {
-        document.getElementById('sp-panel').style.display = 'none';
-      });
+    if (!document.getElementById('sp-zona')) {
+      var ancla = document.getElementById('history-zone') || document.getElementById('despacho-history-zone');
+      if (!ancla) return;
+      ancla.insertAdjacentHTML('beforebegin', bloqueHTML());
       document.getElementById('sp-ml').addEventListener('click', function () { plat = 'ML'; pintarPlat(); });
       document.getElementById('sp-tn').addEventListener('click', function () { plat = 'TN'; pintarPlat(); });
       document.getElementById('sp-agregar').addEventListener('click', agregar);
       document.getElementById('sp-cierre').addEventListener('click', enviarCierre);
       document.getElementById('sp-guardar-mails').addEventListener('click', guardarCorreos);
+      document.getElementById('sp-toggle-cfg').addEventListener('click', function () {
+        var c = document.getElementById('sp-cfg');
+        var abierto = c.style.display === 'block';
+        c.style.display = abierto ? 'none' : 'block';
+        if (!abierto) cargarConfig();
+      });
+      pintarPlat();
+      pintarLista();
     }
 
-    if (!document.getElementById('sp-fab')) {
-      var fab = document.createElement('button');
-      fab.id = 'sp-fab';
-      fab.textContent = 'SmartPost';
-      fab.style.cssText = 'position:fixed;left:12px;bottom:92px;z-index:9998;background:#2f5d3a;color:#fff;border:0;border-radius:999px;padding:11px 18px;font-weight:800;font-size:14px;box-shadow:0 6px 18px rgba(0,0,0,.25);';
-      fab.addEventListener('click', abrir);
-      document.body.appendChild(fab);
+    var area = document.getElementById('scanner-list-area');
+    if (area && !area.dataset.pkUntoggle) {
+      area.dataset.pkUntoggle = '1';
+      area.addEventListener('click', function (e) {
+        if (!state || state.dispatchType !== 'tiendanube') return;
+        var card = e.target.closest ? e.target.closest('.tn-card') : null;
+        if (!card) return;
+        var order = card.getAttribute('data-order');
+        if (!order) return;
+        var pkg = (typeof findTnPackage === 'function') ? findTnPackage(order) : null;
+        if (!pkg || pkg.estado !== 'despachado') return;
+        e.stopPropagation();
+        pkg.estado = 'pendiente';
+        delete pkg.scannedAt;
+        delete pkg.scannedCode;
+        for (var i = currentDespacho.length - 1; i >= 0; i--) {
+          if (String(currentDespacho[i]['Numero de Etiqueta']) === String(order)) currentDespacho.splice(i, 1);
+        }
+        state._completionNotified = false;
+        saveState();
+        if (typeof refreshUI === 'function') refreshUI();
+        toast('Desmarcado #' + order, 'info', 2000);
+      }, true);
     }
   }
 
+  var _startScanner = window.startScanner;
+  window.startScanner = function () {
+    try {
+      var t = (typeof resolveDispatchType === 'function') ? resolveDispatchType() : '';
+      if (t === 'tiendanube') return Promise.resolve();
+    } catch (e) {}
+    return _startScanner.apply(this, arguments);
+  };
+
   if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', function () { setTimeout(montar, 60); });
+    document.addEventListener('DOMContentLoaded', function () { setTimeout(montar, 80); });
   } else {
-    setTimeout(montar, 60);
+    setTimeout(montar, 80);
   }
 })();
 </script>
